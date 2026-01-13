@@ -111,10 +111,10 @@ export default function PrivacyPage() {
         If you have any questions about this Privacy Policy, you can contact us by
         email:{" "}
         <a
-          href="mailto:support@spliq.app"
+          href="mailto:sqwatato@gmail.com"
           className="text-slate-900 underline hover:no-underline"
         >
-          support@spliq.app
+          sqwatato@gmail.com
         </a>
       </p>
     </article>

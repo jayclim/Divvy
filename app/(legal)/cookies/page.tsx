@@ -125,10 +125,10 @@ export default function CookiePolicyPage() {
         If you have any questions about our use of cookies or other technologies,
         please email us at{" "}
         <a
-          href="mailto:support@spliq.app"
+          href="mailto:sqwatato@gmail.com"
           className="text-slate-900 underline hover:no-underline"
         >
-          support@spliq.app
+          sqwatato@gmail.com
         </a>
         .
       </p>

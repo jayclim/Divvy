@@ -106,10 +106,10 @@ export default function TermsPage() {
       <p className="text-slate-600 leading-relaxed">
         If you have any questions about these Terms, please contact us at{" "}
         <a
-          href="mailto:support@spliq.app"
+          href="mailto:sqwatato@gmail.com"
           className="text-slate-900 underline hover:no-underline"
         >
-          support@spliq.app
+          sqwatato@gmail.com
         </a>
         .
       </p>
