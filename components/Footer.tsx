@@ -12,7 +12,7 @@ export function Footer() {
               <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center text-white">
                 <Zap className="h-4 w-4 fill-current" />
               </div>
-              <span className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              <span className="text-xl font-bold text-slate-900">
                 Spliq
               </span>
             </div>
@@ -38,6 +38,7 @@ export function Footer() {
             <ul className="space-y-2 text-sm text-muted-foreground">
               <li><a href="/terms" className="hover:text-primary transition-colors">Terms of Service</a></li>
               <li><a href="/privacy" className="hover:text-primary transition-colors">Privacy Policy</a></li>
+              <li><a href="/cookies" className="hover:text-primary transition-colors">Cookie Policy</a></li>
             </ul>
           </div>
         </div>
