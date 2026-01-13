@@ -1,4 +1,4 @@
-# Project "Divvy" Documentation for AI Agents
+# Project "Spliq" Documentation for AI Agents
 
 ## Project Overview
 This is a Next.js 15 application for expense splitting (similar to Splitwise). It uses the App Router, TypeScript, Tailwind CSS, and Drizzle ORM with Postgres.
@@ -9,7 +9,8 @@ This is a Next.js 15 application for expense splitting (similar to Splitwise). I
 - **Styling**: Tailwind CSS, Radix UI (via Shadcn/ui patterns), Lucide React.
 - **Database**: PostgreSQL
 - **ORM**: Drizzle ORM
-- **Authentication**: Supabase Auth / NextAuth (check implementation details in `lib/supabase` or `api/auth.ts`).
+- **Authentication**: Clerk
+- **Payments**: Lemon Squeezy (subscription billing)
 - **Testing**: Jest, React Testing Library.
 
 ## Architecture & Directory Structure
@@ -53,8 +54,24 @@ This is a Next.js 15 application for expense splitting (similar to Splitwise). I
 - **Drop Test DB**: `npm run test:db:drop`
 
 ## Environment Variables
-- **Local Dev**: `.env.local`
-- **Test Environment**: `.env.test.local` (Used by `dev:test` and all `test:*` commands)
+- **Production Testing**: `.env.local` - Used for testing with production services (real Clerk, real Lemon Squeezy, production DB)
+- **Test Environment**: `.env.test.local` - Used for automated tests with test data (`dev:test` and all `test:*` commands)
+
+### Required Environment Variables
+```bash
+# Clerk Authentication
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
+CLERK_SECRET_KEY=sk_...
+
+# Database
+DATABASE_URL=postgresql://...
+
+# Lemon Squeezy (Payments)
+LEMONSQUEEZY_API_KEY=your_api_key
+LEMONSQUEEZY_WEBHOOK_SECRET=your_webhook_signing_secret
+LEMONSQUEEZY_STORE_ID=your_store_id
+NEXT_PUBLIC_LEMONSQUEEZY_VARIANT_ID=your_variant_id
+```
 
 ## Code Quality
 - **Linting**: `npm run lint`

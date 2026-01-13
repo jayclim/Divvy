@@ -145,7 +145,7 @@ export default function Dashboard() {
   if (groups.length === 0) {
     return (
       <div className="text-center py-12">
-        <div className="w-24 h-24 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-6">
+        <div className="w-24 h-24 bg-black rounded-full flex items-center justify-center mx-auto mb-6">
           <Sparkles className="h-12 w-12 text-white" />
         </div>
         <h2 className="text-2xl font-bold mb-4">Welcome to Spliq!</h2>

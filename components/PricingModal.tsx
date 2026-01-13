@@ -27,7 +27,7 @@ export function PricingModal({ children }: PricingModalProps) {
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-2xl">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-r from-blue-500 to-purple-600">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-black">
               <Zap className="h-5 w-5 text-white" />
             </div>
             Upgrade to Pro
@@ -68,7 +68,7 @@ export function PricingModal({ children }: PricingModalProps) {
             <p className="text-xs text-muted-foreground">Cancel anytime.</p>
           </div>
         </div>
-        <Button onClick={handleUpgrade} className="w-full bg-gradient-to-r from-blue-600 to-purple-600 font-bold text-white hover:from-blue-700 hover:to-purple-700">
+        <Button onClick={handleUpgrade} className="w-full bg-black font-bold text-white hover:bg-slate-800">
           Upgrade Now
         </Button>
       </DialogContent>

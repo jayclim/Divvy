@@ -54,8 +54,8 @@ This is a Next.js 15 application for expense splitting (similar to Splitwise). I
 - **Drop Test DB**: `npm run test:db:drop`
 
 ## Environment Variables
-- **Production Testing**: `.env.local` - Used for testing with production services (real Clerk, real Lemon Squeezy, production DB)
-- **Test Environment**: `.env.test.local` - Used for automated tests with test data (`dev:test` and all `test:*` commands)
+- **Production Testing**: `.env.local` - Used with `npm run dev` for testing against production services (real Clerk, real Lemon Squeezy, production DB)
+- **Development/Test Environment**: `.env.test.local` - Used with `npm run dev:test` for local development with test data, ngrok webhook testing, and all `test:*` commands
 
 ### Required Environment Variables
 ```bash

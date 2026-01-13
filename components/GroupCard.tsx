@@ -36,7 +36,7 @@ export function GroupCard({ group }: GroupCardProps) {
     <Card className="hover:shadow-lg transition-all duration-300 cursor-pointer group h-full flex flex-col" onClick={() => router.push(`/groups/${group.id}`)}>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-lg group-hover:text-blue-600 transition-colors">
+          <CardTitle className="text-lg group-hover:text-slate-600 transition-colors">
             {group.name}
           </CardTitle>
           {group.unreadCount > 0 && (
