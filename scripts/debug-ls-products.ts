@@ -56,7 +56,7 @@ async function main() {
                 console.log(`        - Name: ${variant.attributes.name}`);
                 console.log(`          ID: ${variant.id}  <-- USE THIS ID`);
                 console.log(`          Status: ${variant.attributes.status}`);
-                console.log(`          Sort Order: ${variant.attributes.sort_sort}`);
+                console.log(`          Sort Order: ${variant.attributes.sort}`);
             }
         }
 
