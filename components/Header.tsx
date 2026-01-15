@@ -1,11 +1,15 @@
 "use client";
 
-import { Zap } from 'lucide-react';
+import { Zap, Crown } from 'lucide-react';
 import { useRouter } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import { PricingModal } from "@/components/PricingModal";
 
-export function Header() {
+interface HeaderProps {
+  isPro?: boolean;
+}
+
+export function Header({ isPro = false }: HeaderProps) {
   const router = useRouter();
 
   return (
@@ -23,14 +27,21 @@ export function Header() {
           </span>
         </div>
         <div className="flex items-center gap-4">
-          <PricingModal>
-            <button className="rounded-full bg-black px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-slate-800">
-              Upgrade to Pro
-            </button>
-          </PricingModal>
+          {isPro ? (
+            <div className="flex items-center gap-1.5 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 px-3 py-1.5 text-sm font-medium text-white">
+              <Crown className="h-4 w-4" />
+              Pro
+            </div>
+          ) : (
+            <PricingModal>
+              <button className="rounded-full bg-black px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-slate-800">
+                Upgrade to Pro
+              </button>
+            </PricingModal>
+          )}
           <div
-             className="text-sm text-slate-500 hover:text-slate-900 cursor-pointer transition-colors"
-             onClick={() => router.push('/settings')}
+            className="text-sm text-slate-500 hover:text-slate-900 cursor-pointer transition-colors"
+            onClick={() => router.push('/settings')}
           >
             Settings
           </div>

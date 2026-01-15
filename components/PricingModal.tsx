@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -9,16 +10,35 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Check, Zap } from "lucide-react";
+import { Check, Loader2, Zap } from "lucide-react";
+import { getCheckoutUrl } from "@/lib/actions/billing";
 
 interface PricingModalProps {
   children?: React.ReactNode;
 }
 
 export function PricingModal({ children }: PricingModalProps) {
-  const handleUpgrade = () => {
-     // TODO: Replace with real Lemon Squeezy checkout link generation
-     window.open("https://store.lemonsqueezy.com/checkout/buy/...", "_blank");
+  const [loading, setLoading] = useState(false);
+
+  const handleUpgrade = async () => {
+    const proVariantId = process.env.NEXT_PUBLIC_LEMONSQUEEZY_PRO_MONTHLY_VARIANT_ID;
+
+    if (!proVariantId) {
+      console.error("NEXT_PUBLIC_LEMONSQUEEZY_PRO_MONTHLY_VARIANT_ID is not set");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const checkoutUrl = await getCheckoutUrl(parseInt(proVariantId, 10));
+      if (checkoutUrl) {
+        window.open(checkoutUrl, "_blank");
+      }
+    } catch (error) {
+      console.error("Failed to create checkout:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -68,8 +88,19 @@ export function PricingModal({ children }: PricingModalProps) {
             <p className="text-xs text-muted-foreground">Cancel anytime.</p>
           </div>
         </div>
-        <Button onClick={handleUpgrade} className="w-full bg-black font-bold text-white hover:bg-slate-800">
-          Upgrade Now
+        <Button
+          onClick={handleUpgrade}
+          className="w-full bg-black font-bold text-white hover:bg-slate-800"
+          disabled={loading}
+        >
+          {loading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Loading...
+            </>
+          ) : (
+            "Upgrade Now"
+          )}
         </Button>
       </DialogContent>
     </Dialog>

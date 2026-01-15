@@ -41,11 +41,11 @@ describe('Group Archival', () => {
         }).returning();
         groupId = group.id;
 
-        // Add Alice as admin
+        // Add Alice as owner
         await db.insert(usersToGroups).values({
             userId: aliceId,
             groupId: groupId,
-            role: 'admin',
+            role: 'owner',
         });
 
         // Add Bob as member
@@ -63,7 +63,7 @@ describe('Group Archival', () => {
         }
     });
 
-    it('should allow admin to archive group', async () => {
+    it('should allow owner to archive group', async () => {
         mockUserId = aliceId;
         (syncUser as jest.Mock).mockResolvedValue({ id: aliceId, email: 'alice@test.com' });
 
@@ -86,13 +86,13 @@ describe('Group Archival', () => {
         expect(log?.actorId).toBe(aliceId);
     });
 
-    it('should not allow non-admin to archive group', async () => {
+    it('should not allow non-owner to archive group', async () => {
         mockUserId = bobId;
         (syncUser as jest.Mock).mockResolvedValue({ id: bobId, email: 'bob@test.com' });
 
         await expect(archiveGroup(groupId.toString()))
             .rejects
-            .toThrow('Access denied: Only admins can delete groups');
+            .toThrow('Access denied: Only owners can delete groups');
 
         const group = await db.query.groups.findFirst({
             where: eq(groups.id, groupId),

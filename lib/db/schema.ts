@@ -19,6 +19,15 @@ import { relations } from 'drizzle-orm';
 
 export const roleEnum = pgEnum('role', ['owner', 'admin', 'member']);
 export const invitationStatusEnum = pgEnum('invitation_status', ['pending', 'accepted', 'declined']);
+export const subscriptionStatusEnum = pgEnum('subscription_status_enum', [
+  'on_trial',
+  'active',
+  'paused',
+  'past_due',
+  'unpaid',
+  'cancelled',
+  'expired',
+]);
 
 // =================================
 //          TABLES
@@ -34,6 +43,8 @@ export const users = pgTable('users', {
   isGhost: boolean('is_ghost').default(false).notNull(),
   // Subscription fields
   subscriptionTier: text('subscription_tier', { enum: ['free', 'pro'] }).default('free').notNull(),
+  subscriptionStatus: text('subscription_status').default('active').notNull(),
+  isPaused: boolean('is_paused').default(false).notNull(),
   lemonSqueezyCustomerId: text('lemon_squeezy_customer_id'),
   lemonSqueezySubscriptionId: text('lemon_squeezy_subscription_id'),
   currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
@@ -200,6 +211,65 @@ export const activityLogs = pgTable('activity_logs', {
 });
 
 // =================================
+//        BILLING TABLES
+// =================================
+
+// Plans table - synced from Lemon Squeezy products/variants
+export const plans = pgTable('plans', {
+  id: serial('id').primaryKey(),
+  productId: integer('product_id').notNull(), // Lemon Squeezy product ID
+  productName: text('product_name'),
+  variantId: integer('variant_id').notNull().unique(), // Lemon Squeezy variant ID
+  name: text('name').notNull(),
+  description: text('description'),
+  price: text('price').notNull(), // Store as string to avoid floating point issues
+  isUsageBased: boolean('is_usage_based').default(false),
+  interval: text('interval'), // 'month', 'year', null for one-time
+  intervalCount: integer('interval_count').default(1),
+  trialInterval: text('trial_interval'),
+  trialIntervalCount: integer('trial_interval_count'),
+  sort: integer('sort'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Subscriptions table - links users to their Lemon Squeezy subscriptions
+export const subscriptions = pgTable('subscriptions', {
+  id: serial('id').primaryKey(),
+  lemonSqueezyId: text('lemon_squeezy_id').notNull().unique(), // Lemon Squeezy subscription ID
+  orderId: integer('order_id').notNull(), // Lemon Squeezy order ID
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  status: subscriptionStatusEnum('status').notNull(),
+  statusFormatted: text('status_formatted'),
+  renewsAt: timestamp('renews_at', { withTimezone: true }),
+  endsAt: timestamp('ends_at', { withTimezone: true }),
+  trialEndsAt: timestamp('trial_ends_at', { withTimezone: true }),
+  price: text('price').notNull(),
+  isUsageBased: boolean('is_usage_based').default(false),
+  isPaused: boolean('is_paused').default(false),
+  subscriptionItemId: integer('subscription_item_id'),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+  planId: integer('plan_id')
+    .notNull()
+    .references(() => plans.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Webhook events table - stores raw webhook payloads for debugging and reprocessing
+export const webhookEvents = pgTable('webhook_events', {
+  id: serial('id').primaryKey(),
+  eventName: text('event_name').notNull(),
+  processed: boolean('processed').default(false).notNull(),
+  body: jsonb('body').notNull(),
+  processingError: text('processing_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// =================================
 //          RELATIONS
 // =================================
 
@@ -208,6 +278,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   expenses: many(expenses),
   expenseSplits: many(expenseSplits),
   messages: many(messages),
+  subscriptions: many(subscriptions),
 }));
 
 export const groupsRelations = relations(groups, ({ many }) => ({
@@ -306,6 +377,21 @@ export const activityLogsRelations = relations(activityLogs, ({ one }) => ({
   }),
 }));
 
+export const plansRelations = relations(plans, ({ many }) => ({
+  subscriptions: many(subscriptions),
+}));
+
+export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
+  user: one(users, {
+    fields: [subscriptions.userId],
+    references: [users.id],
+  }),
+  plan: one(plans, {
+    fields: [subscriptions.planId],
+    references: [plans.id],
+  }),
+}));
+
 // =================================
 //          TYPE EXPORTS
 // =================================
@@ -318,3 +404,9 @@ export type NewExpenseSplit = typeof expenseSplits.$inferInsert;
 export type NewMessage = typeof messages.$inferInsert;
 export type NewInvitation = typeof invitations.$inferInsert;
 export type NewActivityLog = typeof activityLogs.$inferInsert;
+export type NewPlan = typeof plans.$inferInsert;
+export type Plan = typeof plans.$inferSelect;
+export type NewSubscription = typeof subscriptions.$inferInsert;
+export type Subscription = typeof subscriptions.$inferSelect;
+export type NewWebhookEvent = typeof webhookEvents.$inferInsert;
+export type WebhookEvent = typeof webhookEvents.$inferSelect;

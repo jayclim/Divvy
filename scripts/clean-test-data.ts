@@ -1,5 +1,5 @@
 import { db } from '../lib/db';
-import { users, groups, usersToGroups, expenses, expenseSplits, settlements, messages, activityLogs } from '../lib/db/schema';
+import { users, groups, usersToGroups, expenses, expenseSplits, settlements, messages, activityLogs, subscriptions, webhookEvents, plans } from '../lib/db/schema';
 // import { createClerkClient } from '@clerk/backend'; // Removed top-level import
 import { config } from 'dotenv';
 
@@ -12,6 +12,16 @@ async function cleanTestData(skipClerk = false) {
   console.log('🧹 Cleaning test data...');
 
   try {
+    // Delete billing data first (no FK dependencies on other tables)
+    await db.delete(webhookEvents);
+    console.log('✅ Deleted webhook events');
+
+    await db.delete(subscriptions);
+    console.log('✅ Deleted subscriptions');
+
+    await db.delete(plans);
+    console.log('✅ Deleted plans');
+
     // Delete in correct order to respect foreign key constraints
     await db.delete(expenseSplits);
     console.log('✅ Deleted expense splits');
@@ -65,6 +75,9 @@ async function cleanTestData(skipClerk = false) {
     }
 
     console.log('🎉 Test data cleanup completed!');
+    console.log('');
+    console.log('ℹ️  NOTE: Lemon Squeezy subscriptions cannot be deleted remotely.');
+    console.log('   Test subscriptions persist in Lemon Squeezy but local DB tables are cleared.');
   } catch (error) {
     console.error('❌ Error cleaning test data:', error);
     process.exit(1);

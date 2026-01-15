@@ -7,6 +7,12 @@ if (!global.setImmediate) {
   global.clearImmediate = clearTimeout;
 }
 
+if (typeof global.TextEncoder === 'undefined') {
+  const { TextEncoder, TextDecoder } = require('util');
+  global.TextEncoder = TextEncoder;
+  global.TextDecoder = TextDecoder;
+}
+
 import { client } from '@/lib/db';
 
 afterAll(async () => {

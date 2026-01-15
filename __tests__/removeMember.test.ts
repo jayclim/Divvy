@@ -122,7 +122,7 @@ describe('removeMember Server Action', () => {
         // Try to remove admin (or anyone)
         await expect(removeMember(groupId.toString(), adminId))
             .rejects
-            .toThrow('Access denied: Only admins can remove members');
+            .toThrow('Access denied: Only owners and admins can remove members');
 
         // Cleanup non-admin
         await db.delete(users).where(eq(users.id, nonAdminId));
@@ -154,7 +154,7 @@ describe('removeMember Server Action', () => {
         // Try to remove the other admin
         await expect(removeMember(groupId.toString(), otherAdminId))
             .rejects
-            .toThrow('Access denied: Cannot remove an admin');
+            .toThrow('Access denied: Admins cannot remove other admins');
 
         // Cleanup other admin
         await db.delete(users).where(eq(users.id, otherAdminId));
