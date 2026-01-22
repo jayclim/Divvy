@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from './ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -8,13 +8,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
-import { Calculator } from 'lucide-react';
+import { Calculator, ScanLine, Plus, Trash2, Receipt, ToggleLeft, ToggleRight, Users } from 'lucide-react';
 import { useForm } from 'react-hook-form';
-import { createExpenseAction, CreateExpenseData } from '@/lib/actions/mutations';
+import { createExpenseAction, CreateExpenseData, ExpenseItemData } from '@/lib/actions/mutations';
 import { GroupMember } from '@/api/groups';
 import { useToast } from '@/hooks/useToast';
-import { AIExpenseModal } from './AIExpenseModal';
-import { ScanLine } from 'lucide-react';
+import { AIExpenseModal, ReceiptData } from './AIExpenseModal';
+import { cn } from '@/lib/utils';
 
 interface ManualExpenseModalProps {
   open: boolean;
@@ -23,6 +23,16 @@ interface ManualExpenseModalProps {
   members: GroupMember[];
   onExpenseCreated: () => void;
   currentUserId: string | null;
+}
+
+// Local item type for the form
+interface LocalItem {
+  id: string;
+  name: string;
+  price: string;
+  quantity: number;
+  isSharedCost: boolean;
+  assignedTo: string[];
 }
 
 export function ManualExpenseModal({ open, onClose, groupId, members, onExpenseCreated, currentUserId }: ManualExpenseModalProps) {
@@ -37,15 +47,185 @@ export function ManualExpenseModal({ open, onClose, groupId, members, onExpenseC
   });
 
   const [customAmounts, setCustomAmounts] = useState<Record<string, string>>({});
+  const [items, setItems] = useState<LocalItem[]>([]);
+  const [participants, setParticipants] = useState<string[]>([]); // Who actually went for item-based splitting
   const splitType = watch('splitType');
   const splitBetween = watch('splitBetween');
   const selectedMembers = useMemo(() => splitBetween || [], [splitBetween]);
+
+  // Initialize participants when switching to by_item mode or when modal opens
+  useEffect(() => {
+    if (splitType === 'by_item' && participants.length === 0 && members.length > 0) {
+      // Default to all members, but user can deselect
+      setParticipants(members.map(m => m._id));
+    }
+  }, [splitType, members, participants.length]);
+
+  // Get only participating members for item assignment
+  const participatingMembers = useMemo(() =>
+    members.filter(m => participants.includes(m._id)),
+    [members, participants]
+  );
+
+  const toggleParticipant = useCallback((memberId: string) => {
+    setParticipants(prev => {
+      const isParticipating = prev.includes(memberId);
+      if (isParticipating) {
+        // Remove from participants and also remove from all item assignments
+        setItems(currentItems => currentItems.map(item => ({
+          ...item,
+          assignedTo: item.assignedTo.filter(id => id !== memberId)
+        })));
+        return prev.filter(id => id !== memberId);
+      } else {
+        return [...prev, memberId];
+      }
+    });
+  }, []);
   
   // Calculate total amount based on split type
   const formAmount = watch('amount');
-  const totalAmount = splitType === 'equal' 
+  const itemsTotal = useMemo(() =>
+    items.reduce((sum, item) => sum + (parseFloat(item.price) || 0) * item.quantity, 0),
+    [items]
+  );
+  const totalAmount = splitType === 'equal'
     ? (parseFloat(formAmount?.toString() || '0') || 0)
+    : splitType === 'by_item'
+    ? itemsTotal
     : Object.values(customAmounts).reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
+
+  // Calculate per-person totals for item-based splitting with detailed breakdown
+  const itemBasedSummary = useMemo(() => {
+    if (splitType !== 'by_item' || items.length === 0) {
+      return { userBreakdowns: {}, totalSharedCost: 0, totalSubtotal: 0 };
+    }
+
+    const userSubtotals: Record<string, number> = {};
+    const userSharedCosts: Record<string, number> = {};
+    let totalNonSharedCost = 0;
+    const sharedCosts: LocalItem[] = [];
+
+    // First pass: calculate non-shared costs (subtotals)
+    for (const item of items) {
+      const itemTotal = (parseFloat(item.price) || 0) * item.quantity;
+      if (item.isSharedCost) {
+        sharedCosts.push(item);
+      } else if (item.assignedTo.length > 0) {
+        totalNonSharedCost += itemTotal;
+        const perPerson = itemTotal / item.assignedTo.length;
+        for (const userId of item.assignedTo) {
+          userSubtotals[userId] = (userSubtotals[userId] || 0) + perPerson;
+        }
+      }
+    }
+
+    // Calculate total shared cost
+    const totalSharedCost = sharedCosts.reduce(
+      (sum, item) => sum + (parseFloat(item.price) || 0) * item.quantity, 0
+    );
+
+    // Second pass: distribute shared costs proportionally
+    if (totalSharedCost > 0) {
+      if (totalNonSharedCost > 0) {
+        for (const [userId, subtotal] of Object.entries(userSubtotals)) {
+          const proportion = subtotal / totalNonSharedCost;
+          userSharedCosts[userId] = totalSharedCost * proportion;
+        }
+      } else {
+        // If only shared costs, split equally among all assigned users
+        const allUsers = new Set<string>();
+        for (const item of items) {
+          for (const userId of item.assignedTo) {
+            allUsers.add(userId);
+          }
+        }
+        if (allUsers.size > 0) {
+          const perPerson = totalSharedCost / allUsers.size;
+          for (const userId of allUsers) {
+            userSubtotals[userId] = userSubtotals[userId] || 0;
+            userSharedCosts[userId] = perPerson;
+          }
+        }
+      }
+    }
+
+    // Build final breakdown per user
+    const userBreakdowns: Record<string, { subtotal: number; sharedCost: number; total: number }> = {};
+    const allUserIds = new Set([...Object.keys(userSubtotals), ...Object.keys(userSharedCosts)]);
+    for (const userId of allUserIds) {
+      const subtotal = userSubtotals[userId] || 0;
+      const sharedCost = userSharedCosts[userId] || 0;
+      userBreakdowns[userId] = {
+        subtotal,
+        sharedCost,
+        total: subtotal + sharedCost,
+      };
+    }
+
+    return { userBreakdowns, totalSharedCost, totalSubtotal: totalNonSharedCost };
+  }, [items, splitType]);
+
+  // Helper functions for item management
+  const addItem = useCallback((name = '', price = '', isSharedCost = false) => {
+    const newItem: LocalItem = {
+      id: crypto.randomUUID(),
+      name,
+      price,
+      quantity: 1,
+      isSharedCost,
+      assignedTo: isSharedCost ? [] : participants, // Default: assign to participants only
+    };
+    setItems(prev => [...prev, newItem]);
+  }, [participants]);
+
+  const removeItem = useCallback((itemId: string) => {
+    setItems(prev => prev.filter(item => item.id !== itemId));
+  }, []);
+
+  const updateItem = useCallback((itemId: string, updates: Partial<LocalItem>) => {
+    setItems(prev => prev.map(item =>
+      item.id === itemId ? { ...item, ...updates } : item
+    ));
+  }, []);
+
+  const toggleMemberForItem = useCallback((itemId: string, memberId: string) => {
+    setItems(prev => prev.map(item => {
+      if (item.id !== itemId) return item;
+      const isAssigned = item.assignedTo.includes(memberId);
+      return {
+        ...item,
+        assignedTo: isAssigned
+          ? item.assignedTo.filter(id => id !== memberId)
+          : [...item.assignedTo, memberId]
+      };
+    }));
+  }, []);
+
+  // Handle scanned receipt data
+  const handleReceiptScanned = useCallback((data: ReceiptData) => {
+    // Use current participants, or default to all members if none selected
+    const assignees = participants.length > 0 ? participants : members.map(m => m._id);
+
+    // If no participants yet, set them
+    if (participants.length === 0) {
+      setParticipants(members.map(m => m._id));
+    }
+
+    // Clear existing items and add scanned ones
+    const scannedItems: LocalItem[] = data.items.map(item => ({
+      id: crypto.randomUUID(),
+      name: item.name,
+      price: item.price.toString(),
+      quantity: 1,
+      isSharedCost: /tax|tip|service|fee|gratuity/i.test(item.name),
+      assignedTo: /tax|tip|service|fee|gratuity/i.test(item.name) ? [] : assignees,
+    }));
+    setItems(scannedItems);
+    setValue('description', `Receipt from ${data.merchant || 'Unknown'}`);
+    setValue('splitType', 'by_item');
+    toast({ title: 'Receipt Scanned', description: `Found ${data.items.length} items. Assign people who went!` });
+  }, [members, participants, setValue, toast]);
 
   // Reset custom amounts when total amount changes or members change, if in equal mode
   useEffect(() => {
@@ -86,7 +266,7 @@ export function ManualExpenseModal({ open, onClose, groupId, members, onExpenseC
   const onSubmit = async (data: CreateExpenseData) => {
     try {
       setLoading(true);
-      
+
       if (!data.paidById) {
         toast({
           title: "Error",
@@ -96,6 +276,66 @@ export function ManualExpenseModal({ open, onClose, groupId, members, onExpenseC
         return;
       }
 
+      // Validation for item-based splitting
+      if (data.splitType === 'by_item') {
+        if (items.length === 0) {
+          toast({
+            title: "Error",
+            description: "Please add at least one item",
+            variant: "destructive",
+          });
+          setLoading(false);
+          return;
+        }
+
+        // Check if any non-shared item has no assignments
+        const unassignedItems = items.filter(item => !item.isSharedCost && item.assignedTo.length === 0);
+        if (unassignedItems.length > 0) {
+          toast({
+            title: "Error",
+            description: `Please assign "${unassignedItems[0].name}" to at least one person`,
+            variant: "destructive",
+          });
+          setLoading(false);
+          return;
+        }
+
+        // Convert local items to ExpenseItemData format
+        const itemsData: ExpenseItemData[] = items.map(item => ({
+          name: item.name,
+          price: parseFloat(item.price) || 0,
+          quantity: item.quantity,
+          isSharedCost: item.isSharedCost,
+          assignedTo: item.assignedTo,
+        }));
+
+        // Get all assigned users for splitBetween
+        const allAssignedUsers = new Set<string>();
+        for (const item of items) {
+          for (const userId of item.assignedTo) {
+            allAssignedUsers.add(userId);
+          }
+        }
+
+        await createExpenseAction({
+          ...data,
+          amount: itemsTotal,
+          groupId,
+          splitType: 'by_item',
+          splitBetween: Array.from(allAssignedUsers),
+          items: itemsData,
+        });
+
+        toast({
+          title: "Expense added!",
+          description: `Split ${items.length} items among ${allAssignedUsers.size} people.`,
+        });
+        handleClose();
+        onExpenseCreated();
+        return;
+      }
+
+      // Existing validation for equal/custom splits
       if (!data.splitBetween || data.splitBetween.length === 0) {
         toast({
           title: "Error",
@@ -111,7 +351,7 @@ export function ManualExpenseModal({ open, onClose, groupId, members, onExpenseC
       if (data.splitType === 'custom') {
         const currentTotal = Object.values(customAmounts).reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
         finalAmount = currentTotal;
-        
+
         if (currentTotal <= 0) {
            toast({
             title: "Error",
@@ -160,6 +400,8 @@ export function ManualExpenseModal({ open, onClose, groupId, members, onExpenseC
     onClose();
     reset();
     setCustomAmounts({});
+    setItems([]);
+    setParticipants([]);
   };
 
   const handleSelectAll = () => {
@@ -177,14 +419,9 @@ export function ManualExpenseModal({ open, onClose, groupId, members, onExpenseC
             </div>
             <span>Add Expense Manually</span>
           </DialogTitle>
-          <AIExpenseModal 
+          <AIExpenseModal
             groupId={parseInt(groupId)}
-            onScanComplete={(data) => {
-              setValue('amount', data.total);
-              setValue('description', `Receipt from ${data.merchant || 'Unknown'}`);
-              // Could also try to match category based on merchant
-              toast({ title: 'Receipt Applied', description: 'Form updated with receipt data.' });
-            }}
+            onScanComplete={handleReceiptScanned}
           >
              <Button variant="outline" size="sm" className="gap-2 text-blue-600 border-blue-200 hover:bg-blue-50">
                <ScanLine className="h-4 w-4" />
@@ -194,15 +431,19 @@ export function ManualExpenseModal({ open, onClose, groupId, members, onExpenseC
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-          <Tabs 
-            defaultValue="equal" 
-            value={watch('splitType')} 
-            onValueChange={(val) => setValue('splitType', val as 'equal' | 'custom')}
+          <Tabs
+            defaultValue="equal"
+            value={watch('splitType')}
+            onValueChange={(val) => setValue('splitType', val as 'equal' | 'custom' | 'by_item')}
             className="w-full"
           >
-            <TabsList className="grid w-full grid-cols-2 mb-6">
-              <TabsTrigger value="equal">Split Equally</TabsTrigger>
-              <TabsTrigger value="custom">Split Unequally</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-3 mb-6">
+              <TabsTrigger value="equal">Equal</TabsTrigger>
+              <TabsTrigger value="custom">Custom</TabsTrigger>
+              <TabsTrigger value="by_item" className="flex items-center gap-1">
+                <Receipt className="h-3 w-3" />
+                By Item
+              </TabsTrigger>
             </TabsList>
 
             <div className="space-y-4">
@@ -237,10 +478,19 @@ export function ManualExpenseModal({ open, onClose, groupId, members, onExpenseC
                 {splitType === 'custom' && (
                   <div className="space-y-2">
                     <Label>Total Amount</Label>
-                    <div className="flex h-10 w-full rounded-md border border-input bg-slate-100 px-3 py-2 text-sm text-muted-foreground ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50">
+                    <div className="flex h-10 w-full rounded-md border border-input bg-slate-100 px-3 py-2 text-sm text-muted-foreground">
                       ${totalAmount.toFixed(2)}
                     </div>
                     <p className="text-[10px] text-muted-foreground">Calculated from individual splits below</p>
+                  </div>
+                )}
+                {splitType === 'by_item' && (
+                  <div className="space-y-2">
+                    <Label>Total from Items</Label>
+                    <div className="flex h-10 w-full rounded-md border border-input bg-gradient-to-r from-amber-50 to-orange-50 px-3 py-2 text-sm font-medium text-amber-800">
+                      ${itemsTotal.toFixed(2)}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground">Sum of all items below</p>
                   </div>
                 )}
                 <div className="space-y-2">
@@ -289,42 +539,222 @@ export function ManualExpenseModal({ open, onClose, groupId, members, onExpenseC
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Split between</Label>
-                  <Button 
-                    type="button" 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={handleSelectAll}
-                    className="h-auto p-0 text-xs text-blue-600 hover:text-blue-700"
-                  >
-                    Select All
-                  </Button>
+              {/* Split between - only for equal/custom modes */}
+              {splitType !== 'by_item' && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Split between</Label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleSelectAll}
+                      className="h-auto p-0 text-xs text-blue-600 hover:text-blue-700"
+                    >
+                      Select All
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 max-h-32 overflow-y-auto border rounded-md p-2">
+                    {members.map((member) => (
+                      <label key={member._id} className="flex items-center space-x-3 cursor-pointer p-2 hover:bg-slate-50 rounded">
+                        <input
+                          type="checkbox"
+                          {...register('splitBetween')}
+                          value={member._id}
+                          className="rounded border-slate-300 text-green-600 focus:ring-green-500"
+                        />
+                        <Avatar className="h-8 w-8">
+                          <AvatarImage src={member.avatar} />
+                          <AvatarFallback className="text-xs">
+                            {getInitials(member.name)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="text-sm font-medium">{member.name}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-                <div className="grid grid-cols-1 gap-2 max-h-32 overflow-y-auto border rounded-md p-2">
-                  {members.map((member) => (
-                    <label key={member._id} className="flex items-center space-x-3 cursor-pointer p-2 hover:bg-slate-50 rounded">
-                      <input
-                        type="checkbox"
-                        {...register('splitBetween')}
-                        value={member._id}
-                        className="rounded border-slate-300 text-green-600 focus:ring-green-500"
-                      />
-                      <Avatar className="h-8 w-8">
-                        <AvatarImage src={member.avatar} />
-                        <AvatarFallback className="text-xs">
-                          {getInitials(member.name)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <span className="text-sm font-medium">{member.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
+              )}
 
-              {/* Split Details */}
-              {selectedMembers.length > 0 && (
+              {/* Item-based splitting UI */}
+              {splitType === 'by_item' && (
+                <div className="space-y-3">
+                  {/* Who went? - Participant selector */}
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium flex items-center gap-1.5">
+                      <Users className="h-4 w-4 text-slate-500" />
+                      Who went?
+                    </Label>
+                    <div className="flex flex-wrap gap-1.5 p-2 bg-slate-50 rounded-lg border">
+                      {members.map((member) => {
+                        const isParticipating = participants.includes(member._id);
+                        return (
+                          <button
+                            key={member._id}
+                            type="button"
+                            onClick={() => toggleParticipant(member._id)}
+                            className={cn(
+                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-all",
+                              isParticipating
+                                ? "bg-blue-100 text-blue-700 ring-1 ring-blue-300"
+                                : "bg-white text-slate-400 ring-1 ring-slate-200 hover:ring-slate-300"
+                            )}
+                          >
+                            <Avatar className="h-5 w-5">
+                              <AvatarImage src={member.avatar} />
+                              <AvatarFallback className="text-[9px]">
+                                {getInitials(member.name)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span>{member.name.split(' ')[0]}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {participants.length === 0 && (
+                      <p className="text-xs text-amber-600">Select at least one person who participated</p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Label className="text-base font-semibold">Receipt Items</Label>
+                    <div className="flex gap-2">
+                      <AIExpenseModal
+                        groupId={parseInt(groupId)}
+                        onScanComplete={handleReceiptScanned}
+                      >
+                        <Button type="button" variant="outline" size="sm" className="gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50">
+                          <ScanLine className="h-3.5 w-3.5" />
+                          Scan
+                        </Button>
+                      </AIExpenseModal>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => addItem()}
+                        className="gap-1.5"
+                        disabled={participants.length === 0}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Add Item
+                      </Button>
+                    </div>
+                  </div>
+
+                  {items.length === 0 ? (
+                    <div className="border-2 border-dashed rounded-lg p-6 text-center">
+                      <Receipt className="h-10 w-10 mx-auto text-slate-300 mb-2" />
+                      <p className="text-sm text-muted-foreground">
+                        No items yet. Scan a receipt or add items manually.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+                      {items.map((item) => (
+                        <div
+                          key={item.id}
+                          className={cn(
+                            "border rounded-lg p-3 space-y-2 transition-colors",
+                            item.isSharedCost
+                              ? "bg-gradient-to-r from-purple-50 to-indigo-50 border-purple-200"
+                              : "bg-white hover:bg-slate-50"
+                          )}
+                        >
+                          <div className="flex items-start gap-2">
+                            <div className="flex-1 space-y-2">
+                              <Input
+                                value={item.name}
+                                onChange={(e) => updateItem(item.id, { name: e.target.value })}
+                                placeholder="Item name"
+                                className="h-8 text-sm font-medium"
+                              />
+                              <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={item.price}
+                                    onChange={(e) => updateItem(item.id, { price: e.target.value })}
+                                    placeholder="0.00"
+                                    className="h-8 pl-5 text-sm"
+                                  />
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => updateItem(item.id, { isSharedCost: !item.isSharedCost })}
+                                  className={cn(
+                                    "h-8 px-2 text-xs gap-1",
+                                    item.isSharedCost ? "text-purple-600" : "text-slate-500"
+                                  )}
+                                  title={item.isSharedCost ? "Shared cost (tax/tip)" : "Mark as shared cost"}
+                                >
+                                  {item.isSharedCost ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+                                  {item.isSharedCost ? "Shared" : "Share"}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => removeItem(item.id)}
+                                  className="h-8 w-8 text-slate-400 hover:text-red-500"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Member assignment - only show participants */}
+                          {!item.isSharedCost && (
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {participatingMembers.map((member) => {
+                                const isAssigned = item.assignedTo.includes(member._id);
+                                return (
+                                  <button
+                                    key={member._id}
+                                    type="button"
+                                    onClick={() => toggleMemberForItem(item.id, member._id)}
+                                    className={cn(
+                                      "flex items-center gap-1 px-2 py-1 rounded-full text-xs transition-all",
+                                      isAssigned
+                                        ? "bg-green-100 text-green-700 ring-1 ring-green-300"
+                                        : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                                    )}
+                                  >
+                                    <Avatar className="h-4 w-4">
+                                      <AvatarImage src={member.avatar} />
+                                      <AvatarFallback className="text-[8px]">
+                                        {getInitials(member.name)}
+                                      </AvatarFallback>
+                                    </Avatar>
+                                    <span className="max-w-[60px] truncate">{member.name.split(' ')[0]}</span>
+                                  </button>
+                                );
+                              })}
+                              {participatingMembers.length === 0 && (
+                                <span className="text-xs text-slate-400 italic">Select participants above</span>
+                              )}
+                            </div>
+                          )}
+
+                          {item.isSharedCost && (
+                            <p className="text-xs text-purple-600 italic">
+                              Split proportionally based on items
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Split Details - for equal/custom modes */}
+              {splitType !== 'by_item' && selectedMembers.length > 0 && (
                 <Card>
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base">
@@ -370,8 +800,8 @@ export function ManualExpenseModal({ open, onClose, groupId, members, onExpenseC
                               </div>
                               <div className="relative w-full max-w-[120px]">
                                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                                <Input 
-                                  type="number" 
+                                <Input
+                                  type="number"
                                   step="0.01"
                                   className="pl-6 h-8"
                                   value={customAmounts[memberId] || ''}
@@ -384,6 +814,72 @@ export function ManualExpenseModal({ open, onClose, groupId, members, onExpenseC
                         })}
                       </div>
                     )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Item-based Split Summary */}
+              {splitType === 'by_item' && Object.keys(itemBasedSummary.userBreakdowns).length > 0 && (
+                <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Receipt className="h-4 w-4 text-amber-600" />
+                      Split Summary
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {Object.entries(itemBasedSummary.userBreakdowns)
+                        .sort(([, a], [, b]) => b.total - a.total)
+                        .map(([memberId, breakdown]) => {
+                          const member = members.find(m => m._id === memberId);
+                          return (
+                            <div key={memberId} className="space-y-1">
+                              <div className="flex justify-between items-center">
+                                <div className="flex items-center space-x-2">
+                                  <Avatar className="h-6 w-6 ring-2 ring-white">
+                                    <AvatarImage src={member?.avatar} />
+                                    <AvatarFallback className="text-xs bg-amber-100">
+                                      {member ? getInitials(member.name) : '?'}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  <span className="text-sm font-medium">{member?.name}</span>
+                                </div>
+                                <Badge className="bg-amber-600 hover:bg-amber-700">
+                                  ${breakdown.total.toFixed(2)}
+                                </Badge>
+                              </div>
+                              {/* Breakdown details */}
+                              {itemBasedSummary.totalSharedCost > 0 && (
+                                <div className="ml-8 flex gap-3 text-[11px] text-amber-700">
+                                  <span>Items: ${breakdown.subtotal.toFixed(2)}</span>
+                                  <span className="text-purple-600">+ Tax/Tip: ${breakdown.sharedCost.toFixed(2)}</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                      {/* Totals breakdown */}
+                      <div className="border-t border-amber-200 pt-2 mt-2 space-y-1">
+                        {itemBasedSummary.totalSharedCost > 0 && (
+                          <>
+                            <div className="flex justify-between items-center text-xs text-amber-700">
+                              <span>Subtotal (items)</span>
+                              <span>${itemBasedSummary.totalSubtotal.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between items-center text-xs text-purple-600">
+                              <span>Tax/Tip/Fees</span>
+                              <span>${itemBasedSummary.totalSharedCost.toFixed(2)}</span>
+                            </div>
+                          </>
+                        )}
+                        <div className="flex justify-between items-center pt-1">
+                          <span className="text-sm font-semibold text-amber-800">Total</span>
+                          <span className="text-sm font-bold text-amber-800">${itemsTotal.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
                   </CardContent>
                 </Card>
               )}

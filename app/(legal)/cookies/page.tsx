@@ -83,15 +83,9 @@ export default function CookiesPage() {
             </thead>
             <tbody className="divide-y">
               <tr>
-                <td className="p-2 font-mono text-xs">osano_consentmanager</td>
-                <td className="p-2">Osano</td>
+                <td className="p-2 font-mono text-xs">cc_cookie</td>
+                <td className="p-2">Spliq</td>
                 <td className="p-2">Stores your cookie consent preferences (e.g., whether you accepted or declined non-essential cookies) so the banner does not reappear unnecessarily.</td>
-                <td className="p-2">1 Year</td>
-              </tr>
-              <tr>
-                <td className="p-2 font-mono text-xs">osano_consentmanager_uuid</td>
-                <td className="p-2">Osano</td>
-                <td className="p-2">A unique identifier used to log your consent status for compliance auditing.</td>
                 <td className="p-2">1 Year</td>
               </tr>
             </tbody>
@@ -104,7 +98,7 @@ export default function CookiesPage() {
         
         <h3 className="text-xl font-semibold text-slate-900">4.1 Consent Banner.</h3>
         <p>
-          When you first visit Spliq, you will be presented with a Cookie Consent Banner (powered by Osano). You can use this banner to review and manage your preferences. Since Spliq currently only uses Strictly Necessary and Compliance cookies, the banner may inform you that these cookies are active for the service to function.
+          When you first visit Spliq, you will be presented with a Cookie Consent Banner. You can use this banner to accept all cookies, reject non-essential cookies, or manage your preferences in detail. You can change your preferences at any time by clicking "Manage preferences" in the banner or by clearing your browser cookies.
         </p>
 
         <h3 className="text-xl font-semibold text-slate-900">4.2 Browser Settings.</h3>

@@ -49,12 +49,15 @@ export default function Dashboard() {
       const invites = await getPendingInvitations();
       setPendingInvites(invites);
       if (accept) refetch();
-    } catch {
+    } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to respond to invitation",
+        description: error instanceof Error ? error.message : "Failed to respond to invitation",
         variant: "destructive",
       });
+      // Refresh invites to remove any stale entries
+      const invites = await getPendingInvitations();
+      setPendingInvites(invites);
     }
   };
 
@@ -149,9 +152,9 @@ export default function Dashboard() {
           <Sparkles className="h-12 w-12 text-white" />
         </div>
         <h2 className="text-2xl font-bold mb-4">Welcome to Spliq!</h2>
-              <p className="text-muted-foreground mb-4">
-                You haven&apos;t joined any groups yet. Create a new group or join an existing one to start splitting expenses!
-              </p>
+        <p className="text-muted-foreground mb-4">
+          You haven&apos;t joined any groups yet. Create a new group or join an existing one to start splitting expenses!
+        </p>
         <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
           {pendingInvites.length > 0 && renderInvitationsDialog()}
           <CreateGroupModal onGroupCreated={handleGroupUpdate} />

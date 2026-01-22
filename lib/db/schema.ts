@@ -19,6 +19,9 @@ import { relations } from 'drizzle-orm';
 
 export const roleEnum = pgEnum('role', ['owner', 'admin', 'member']);
 export const invitationStatusEnum = pgEnum('invitation_status', ['pending', 'accepted', 'declined']);
+export const scanStatusEnum = pgEnum('scan_status', ['success', 'failed', 'partial']);
+export const digestFrequencyEnum = pgEnum('digest_frequency', ['instant', 'daily', 'weekly', 'none']);
+export const notificationTypeEnum = pgEnum('notification_type', ['expense_added', 'settlement_received', 'member_joined', 'member_left']);
 export const subscriptionStatusEnum = pgEnum('subscription_status_enum', [
   'on_trial',
   'active',
@@ -48,6 +51,9 @@ export const users = pgTable('users', {
   lemonSqueezyCustomerId: text('lemon_squeezy_customer_id'),
   lemonSqueezySubscriptionId: text('lemon_squeezy_subscription_id'),
   currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+  // AI scan usage tracking (individual-based limit)
+  monthlyAiScansUsed: integer('monthly_ai_scans_used').default(0).notNull(),
+  lastScanReset: timestamp('last_scan_reset', { withTimezone: true }),
   // Methods for smart settlements
   paymentMethods: jsonb('payment_methods').$type<Record<string, string>>().default({}),
 });
@@ -122,6 +128,8 @@ export const usersToGroups = pgTable(
   })
 );
 
+export const splitMethodEnum = pgEnum('split_method', ['equal', 'custom', 'by_item']);
+
 export const expenses = pgTable('expenses', {
   id: serial('id').primaryKey(),
   groupId: integer('group_id')
@@ -136,6 +144,7 @@ export const expenses = pgTable('expenses', {
   category: text('category'),
   receiptUrl: text('receipt_url'),
   settled: boolean('settled').default(false).notNull(),
+  splitMethod: text('split_method', { enum: ['equal', 'custom', 'by_item'] }).default('equal').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -153,6 +162,31 @@ export const expenseSplits = pgTable(
   }
   // Remove the table configuration function entirely since we're using 'id' as primary key
 );
+
+// Expense items table - stores individual receipt line items for item-based splitting
+export const expenseItems = pgTable('expense_items', {
+  id: serial('id').primaryKey(),
+  expenseId: integer('expense_id')
+    .notNull()
+    .references(() => expenses.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  price: decimal('price', { precision: 10, scale: 2 }).notNull(),
+  quantity: integer('quantity').default(1).notNull(),
+  isSharedCost: boolean('is_shared_cost').default(false).notNull(), // For tax, tip, service charges
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Item assignments table - tracks who ordered/shared each item
+export const itemAssignments = pgTable('item_assignments', {
+  id: serial('id').primaryKey(),
+  itemId: integer('item_id')
+    .notNull()
+    .references(() => expenseItems.id, { onDelete: 'cascade' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+  sharePercentage: decimal('share_percentage', { precision: 5, scale: 2 }).default('100').notNull(),
+});
 
 export const settlements = pgTable('settlements', {
   id: serial('id').primaryKey(),
@@ -270,6 +304,78 @@ export const webhookEvents = pgTable('webhook_events', {
 });
 
 // =================================
+//        EMAIL NOTIFICATION TABLES
+// =================================
+
+// User email notification preferences
+export const emailPreferences = pgTable('email_preferences', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+  // Immediate notifications
+  invitations: boolean('invitations').default(true).notNull(),
+  // Digest notifications (batched)
+  expenseAdded: boolean('expense_added').default(true).notNull(),
+  settlementReceived: boolean('settlement_received').default(true).notNull(),
+  memberActivity: boolean('member_activity').default(true).notNull(),
+  // Digest frequency for batched notifications
+  digestFrequency: digestFrequencyEnum('digest_frequency').default('daily').notNull(),
+  // Timestamps
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Email unsubscribe list for non-users (people who receive invitations but don't have accounts)
+export const emailUnsubscribes = pgTable('email_unsubscribes', {
+  id: serial('id').primaryKey(),
+  email: text('email').notNull().unique(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Pending notifications queue for daily/weekly digest
+export const pendingNotifications = pgTable('pending_notifications', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+  type: notificationTypeEnum('type').notNull(),
+  groupId: integer('group_id')
+    .references(() => groups.id, { onDelete: 'cascade' }),
+  // Store notification data as JSON for flexibility
+  data: jsonb('data').$type<{
+    description?: string;
+    amount?: string;
+    actorName?: string;
+    groupName?: string;
+    [key: string]: unknown;
+  }>().notNull(),
+  // Has this been sent in a digest?
+  processed: boolean('processed').default(false).notNull(),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// =================================
+//        AI SCAN TABLES
+// =================================
+
+// AI scan logs table - tracks receipt scanning attempts for debugging and analytics
+export const aiScanLogs = pgTable('ai_scan_logs', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade', onUpdate: 'cascade' }),
+  expenseId: integer('expense_id').references(() => expenses.id, { onDelete: 'set null' }),
+  receiptImageUrl: text('receipt_image_url'),
+  rawResponse: jsonb('raw_response'), // For debugging failed scans
+  status: scanStatusEnum('status').notNull(),
+  errorMessage: text('error_message'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// =================================
 //          RELATIONS
 // =================================
 
@@ -308,6 +414,7 @@ export const expensesRelations = relations(expenses, ({ one, many }) => ({
     references: [users.id],
   }),
   splits: many(expenseSplits),
+  items: many(expenseItems),
 }));
 
 export const expenseSplitsRelations = relations(expenseSplits, ({ one }) => ({
@@ -317,6 +424,25 @@ export const expenseSplitsRelations = relations(expenseSplits, ({ one }) => ({
   }),
   user: one(users, {
     fields: [expenseSplits.userId],
+    references: [users.id],
+  }),
+}));
+
+export const expenseItemsRelations = relations(expenseItems, ({ one, many }) => ({
+  expense: one(expenses, {
+    fields: [expenseItems.expenseId],
+    references: [expenses.id],
+  }),
+  assignments: many(itemAssignments),
+}));
+
+export const itemAssignmentsRelations = relations(itemAssignments, ({ one }) => ({
+  item: one(expenseItems, {
+    fields: [itemAssignments.itemId],
+    references: [expenseItems.id],
+  }),
+  user: one(users, {
+    fields: [itemAssignments.userId],
     references: [users.id],
   }),
 }));
@@ -392,6 +518,35 @@ export const subscriptionsRelations = relations(subscriptions, ({ one }) => ({
   }),
 }));
 
+export const aiScanLogsRelations = relations(aiScanLogs, ({ one }) => ({
+  user: one(users, {
+    fields: [aiScanLogs.userId],
+    references: [users.id],
+  }),
+  expense: one(expenses, {
+    fields: [aiScanLogs.expenseId],
+    references: [expenses.id],
+  }),
+}));
+
+export const emailPreferencesRelations = relations(emailPreferences, ({ one }) => ({
+  user: one(users, {
+    fields: [emailPreferences.userId],
+    references: [users.id],
+  }),
+}));
+
+export const pendingNotificationsRelations = relations(pendingNotifications, ({ one }) => ({
+  user: one(users, {
+    fields: [pendingNotifications.userId],
+    references: [users.id],
+  }),
+  group: one(groups, {
+    fields: [pendingNotifications.groupId],
+    references: [groups.id],
+  }),
+}));
+
 // =================================
 //          TYPE EXPORTS
 // =================================
@@ -401,6 +556,10 @@ export type NewUser = typeof users.$inferInsert;
 export type NewGroup = typeof groups.$inferInsert;
 export type NewExpense = typeof expenses.$inferInsert;
 export type NewExpenseSplit = typeof expenseSplits.$inferInsert;
+export type NewExpenseItem = typeof expenseItems.$inferInsert;
+export type ExpenseItem = typeof expenseItems.$inferSelect;
+export type NewItemAssignment = typeof itemAssignments.$inferInsert;
+export type ItemAssignment = typeof itemAssignments.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
 export type NewInvitation = typeof invitations.$inferInsert;
 export type NewActivityLog = typeof activityLogs.$inferInsert;
@@ -410,3 +569,11 @@ export type NewSubscription = typeof subscriptions.$inferInsert;
 export type Subscription = typeof subscriptions.$inferSelect;
 export type NewWebhookEvent = typeof webhookEvents.$inferInsert;
 export type WebhookEvent = typeof webhookEvents.$inferSelect;
+export type NewAiScanLog = typeof aiScanLogs.$inferInsert;
+export type AiScanLog = typeof aiScanLogs.$inferSelect;
+export type NewEmailPreferences = typeof emailPreferences.$inferInsert;
+export type EmailPreferences = typeof emailPreferences.$inferSelect;
+export type NewPendingNotification = typeof pendingNotifications.$inferInsert;
+export type PendingNotification = typeof pendingNotifications.$inferSelect;
+export type NewEmailUnsubscribe = typeof emailUnsubscribes.$inferInsert;
+export type EmailUnsubscribe = typeof emailUnsubscribes.$inferSelect;

@@ -1,12 +1,13 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { usersToGroups, expenses, users, groups, messages, expenseSplits, settlements, activityLogs } from '@/lib/db/schema';
+import { usersToGroups, expenses, users, groups, messages, expenseSplits, settlements, activityLogs, expenseItems, itemAssignments } from '@/lib/db/schema';
 import { auth } from '@clerk/nextjs/server';
 import { syncUser } from '@/lib/auth/sync';
 import { eq, inArray, desc, and } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
-import { invitations } from '@/lib/db/schema';
+import { invitations, groups as groupsTable } from '@/lib/db/schema';
+import { sendGroupInvitationEmail } from '@/lib/email';
 
 export type GroupMember = {
   id: string;
@@ -734,6 +735,18 @@ export async function addReaction(messageId: string, emoji: string): Promise<voi
   console.log(`User ${user.id} added reaction ${emoji} to message ${messageId}`);
 }
 
+export type ExpenseItem = {
+  id: number;
+  name: string;
+  price: number;
+  quantity: number;
+  isSharedCost: boolean;
+  assignedTo: {
+    userId: string;
+    userName: string;
+  }[];
+};
+
 export type Expense = {
   _id: string;
   groupId: string;
@@ -755,6 +768,8 @@ export type Expense = {
   receipt?: string;
   settled: boolean;
   type: 'expense' | 'payment' | 'member_added' | 'member_removed';
+  splitMethod?: 'equal' | 'custom' | 'by_item';
+  items?: ExpenseItem[];
   // For logs
   entityName?: string;
   actorName?: string;
@@ -812,6 +827,20 @@ export async function getExpenses(groupId: string): Promise<{ expenses: Expense[
           },
         },
       },
+      items: {
+        with: {
+          assignments: {
+            with: {
+              user: {
+                columns: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+      },
     },
   });
 
@@ -858,6 +887,22 @@ export async function getExpenses(groupId: string): Promise<{ expenses: Expense[
   const formattedExpenses: Expense[] = groupExpenses.map((expense) => {
     const isPayerMember = currentMemberIds.has(expense.paidBy.id);
 
+    // Format items if this is an item-based expense
+    const formattedItems: ExpenseItem[] | undefined =
+      expense.splitMethod === 'by_item' && expense.items.length > 0
+        ? expense.items.map((item) => ({
+          id: item.id,
+          name: item.name,
+          price: parseFloat(item.price),
+          quantity: item.quantity,
+          isSharedCost: item.isSharedCost,
+          assignedTo: item.assignments.map((assignment) => ({
+            userId: assignment.user.id,
+            userName: assignment.user.name || 'Unknown User',
+          })),
+        }))
+        : undefined;
+
     return {
       _id: expense.id.toString(),
       groupId: groupId,
@@ -882,6 +927,8 @@ export async function getExpenses(groupId: string): Promise<{ expenses: Expense[
       receipt: expense.receiptUrl || undefined,
       settled: expense.settled,
       type: 'expense',
+      splitMethod: expense.splitMethod as 'equal' | 'custom' | 'by_item',
+      items: formattedItems,
     };
   });
 
@@ -949,6 +996,20 @@ export async function createGroup(name: string, description?: string, coverImage
 
   const user = await syncUser();
   if (!user) redirect('/sign-in');
+
+  // Check group limit for free tier users (3 groups max)
+  const FREE_TIER_GROUP_LIMIT = 3;
+
+  if (user.subscriptionTier !== 'pro') {
+    // Count how many groups the user is already in
+    const userGroups = await db.query.usersToGroups.findMany({
+      where: eq(usersToGroups.userId, user.id),
+    });
+
+    if (userGroups.length >= FREE_TIER_GROUP_LIMIT) {
+      throw new Error(`Free tier users can only be in ${FREE_TIER_GROUP_LIMIT} groups. Upgrade to Pro for unlimited groups!`);
+    }
+  }
 
   // Create the group
   const [newGroup] = await db.insert(groups).values({
@@ -1103,10 +1164,68 @@ export async function inviteMember(groupId: string, email: string, ghostUserId?:
     status: 'pending',
   }).returning();
 
-  // In a real app, you would send an email here
-  console.log(`Invitation sent to ${email} for group ${groupId}`);
+  // Get group name for the email
+  const group = await db.query.groups.findFirst({
+    where: eq(groupsTable.id, groupIdNum),
+    columns: { name: true },
+  });
+
+  // Send invitation email (non-blocking - errors are logged but don't fail the invite)
+  // Note: At this point, existingUser is undefined (if user existed, we returned early above)
+  sendGroupInvitationEmail({
+    recipientEmail: email,
+    recipientUserId: undefined,
+    inviterName: user.name || 'A Spliq user',
+    groupName: group?.name || 'a group',
+    groupId: groupIdNum,
+  }).catch(err => {
+    console.error('[inviteMember] Failed to send invitation email:', err);
+  });
 
   return invitation;
+}
+
+export async function cancelInvitation(groupId: string, invitationId: number) {
+  const { userId } = await auth();
+  if (!userId) redirect('/sign-in');
+
+  const user = await syncUser();
+  if (!user) redirect('/sign-in');
+
+  const groupIdNum = parseInt(groupId);
+  if (isNaN(groupIdNum)) {
+    throw new Error('Invalid group ID');
+  }
+
+  // Verify requester is an admin or owner of the group
+  const requesterMembership = await db.query.usersToGroups.findFirst({
+    where: and(
+      eq(usersToGroups.userId, user.id),
+      eq(usersToGroups.groupId, groupIdNum)
+    ),
+  });
+
+  if (!requesterMembership || (requesterMembership.role !== 'admin' && requesterMembership.role !== 'owner')) {
+    throw new Error('Access denied: Only owners and admins can cancel invitations');
+  }
+
+  // Find the invitation
+  const invitation = await db.query.invitations.findFirst({
+    where: and(
+      eq(invitations.id, invitationId),
+      eq(invitations.groupId, groupIdNum),
+      eq(invitations.status, 'pending')
+    ),
+  });
+
+  if (!invitation) {
+    throw new Error('Invitation not found or already processed');
+  }
+
+  // Delete the invitation
+  await db.delete(invitations).where(eq(invitations.id, invitationId));
+
+  return { success: true };
 }
 
 export async function removeMember(groupId: string, memberId: string) {
@@ -1218,7 +1337,7 @@ export async function respondToInvitation(invitationId: number, accept: boolean)
   });
 
   if (!invitation) {
-    throw new Error('Invitation not found');
+    throw new Error('This invitation is no longer available. It may have been cancelled by the group admin.');
   }
 
   if (invitation.email !== user.email) {

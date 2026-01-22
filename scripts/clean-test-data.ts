@@ -1,5 +1,5 @@
 import { db } from '../lib/db';
-import { users, groups, usersToGroups, expenses, expenseSplits, settlements, messages, activityLogs, subscriptions, webhookEvents, plans } from '../lib/db/schema';
+import { users, groups, usersToGroups, expenses, expenseSplits, settlements, messages, activityLogs, subscriptions, webhookEvents, plans, emailPreferences, pendingNotifications, emailUnsubscribes, expenseItems, itemAssignments } from '../lib/db/schema';
 // import { createClerkClient } from '@clerk/backend'; // Removed top-level import
 import { config } from 'dotenv';
 
@@ -22,7 +22,23 @@ async function cleanTestData(skipClerk = false) {
     await db.delete(plans);
     console.log('✅ Deleted plans');
 
+    // Delete email notification data
+    await db.delete(pendingNotifications);
+    console.log('✅ Deleted pending notifications');
+
+    await db.delete(emailPreferences);
+    console.log('✅ Deleted email preferences');
+
+    await db.delete(emailUnsubscribes);
+    console.log('✅ Deleted email unsubscribes');
+
     // Delete in correct order to respect foreign key constraints
+    await db.delete(itemAssignments);
+    console.log('✅ Deleted item assignments');
+
+    await db.delete(expenseItems);
+    console.log('✅ Deleted expense items');
+
     await db.delete(expenseSplits);
     console.log('✅ Deleted expense splits');
 

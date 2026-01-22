@@ -10,7 +10,7 @@ import { Badge } from './ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Settings, Users, Trash2, UserMinus, Crown, Mail, Ghost, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
 import { Group } from '@/api/groups';
-import { createGhostMember, inviteMember, removeMember, updateGroupRole } from '@/lib/actions/groups';
+import { createGhostMember, inviteMember, removeMember, updateGroupRole, cancelInvitation } from '@/lib/actions/groups';
 import { useToast } from '@/hooks/useToast';
 
 interface GroupSettingsModalProps {
@@ -39,7 +39,7 @@ export function GroupSettingsModal({ group, onGroupUpdated }: GroupSettingsModal
   // Member: Notifications only (no tabs UI, just content)
   // Admin: Notifications, Info, Members
   // Owner: Notifications, Info, Members, Advanced
-  
+
   const showTabs = !isMember;
   const tabs = useMemo(() => {
     const t = ['notifications', 'info', 'members'];
@@ -162,6 +162,27 @@ export function GroupSettingsModal({ group, onGroupUpdated }: GroupSettingsModal
     return false;
   };
 
+  const handleCancelInvitation = async (invitationId: number) => {
+    try {
+      setLoading(true);
+      await cancelInvitation(group._id, invitationId);
+      toast({
+        title: "Invitation cancelled",
+        description: "The invitation has been cancelled.",
+      });
+      onGroupUpdated();
+    } catch (error) {
+      console.error(error);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to cancel invitation",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -250,7 +271,7 @@ export function GroupSettingsModal({ group, onGroupUpdated }: GroupSettingsModal
                         Add Ghost User
                       </Button>
                     </div>
-                    
+
                     {addMemberMode === 'email' ? (
                       <div className="space-y-3">
                         <div className="flex space-x-2">
@@ -309,9 +330,20 @@ export function GroupSettingsModal({ group, onGroupUpdated }: GroupSettingsModal
                                   </p>
                                 </div>
                               </div>
-                              <Badge variant="outline" className="text-orange-600 border-orange-200 bg-orange-50">
-                                Pending
-                              </Badge>
+                              <div className="flex items-center space-x-2">
+                                <Badge variant="outline" className="text-orange-600 border-orange-200 bg-orange-50">
+                                  Pending
+                                </Badge>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleCancelInvitation(invite.id)}
+                                  disabled={loading}
+                                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -448,11 +480,11 @@ export function GroupSettingsModal({ group, onGroupUpdated }: GroupSettingsModal
                             {member.role === 'admin' && <Badge className="ml-2 bg-indigo-500 hover:bg-indigo-600 border-transparent text-white">Admin</Badge>}
                             {member.role === 'member' && <Badge variant="outline" className="ml-2 text-slate-500 border-slate-200">Member</Badge>}
                           </div>
-                          
+
                           {member.role !== 'owner' && (
                             <div className="flex items-center space-x-2">
-                               {member.role === 'member' ? (
-                                 <Button
+                              {member.role === 'member' ? (
+                                <Button
                                   size="sm"
                                   variant="outline"
                                   onClick={() => handleUpdateRole(member._id, 'admin')}
@@ -462,7 +494,7 @@ export function GroupSettingsModal({ group, onGroupUpdated }: GroupSettingsModal
                                   <ArrowUpCircle className="h-4 w-4 mr-1" />
                                   Promote
                                 </Button>
-                               ) : (
+                              ) : (
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -473,7 +505,7 @@ export function GroupSettingsModal({ group, onGroupUpdated }: GroupSettingsModal
                                   <ArrowDownCircle className="h-4 w-4 mr-1" />
                                   Demote
                                 </Button>
-                               )}
+                              )}
                             </div>
                           )}
                         </div>

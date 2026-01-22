@@ -4,9 +4,10 @@ import { Badge } from './ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Button } from './ui/button';
 import { Skeleton } from './ui/skeleton';
-import { Receipt, Calendar, DollarSign, Users, Plus, ArrowRightLeft, UserPlus, UserMinus } from 'lucide-react';
+import { Receipt, Calendar, DollarSign, Users, Plus, ArrowRightLeft, UserPlus, UserMinus, ChevronDown, ChevronUp, ListOrdered } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useGroupExpenses } from '@/hooks/useGroupDetails';
+import { cn } from '@/lib/utils';
 
 interface ExpenseHistoryProps {
   groupId: string;
@@ -17,6 +18,19 @@ export function ExpenseHistory({ groupId, onAddExpense }: ExpenseHistoryProps) {
   const { data: expensesData, isLoading: loading } = useGroupExpenses(groupId);
   const expenses = expensesData?.expenses || [];
   const [filter, setFilter] = useState<'all' | 'expense' | 'payment' | 'log'>('all');
+  const [expandedExpenses, setExpandedExpenses] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = (expenseId: string) => {
+    setExpandedExpenses(prev => {
+      const next = new Set(prev);
+      if (next.has(expenseId)) {
+        next.delete(expenseId);
+      } else {
+        next.add(expenseId);
+      }
+      return next;
+    });
+  };
 
   const getInitials = (name: string) => {
     return name.split(' ').map(n => n[0]).join('').toUpperCase();
@@ -142,11 +156,19 @@ export function ExpenseHistory({ groupId, onAddExpense }: ExpenseHistoryProps) {
                             Left
                           </Badge>
                         ) : (
-                          expense.category && (
-                            <Badge variant="secondary" className={`text-xs ${getCategoryColor(expense.category)}`}>
-                              {expense.category}
-                            </Badge>
-                          )
+                          <>
+                            {expense.category && (
+                              <Badge variant="secondary" className={`text-xs ${getCategoryColor(expense.category)}`}>
+                                {expense.category}
+                              </Badge>
+                            )}
+                            {expense.splitMethod === 'by_item' && (
+                              <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-700">
+                                <ListOrdered className="h-3 w-3 mr-1" />
+                                {expense.items?.length || 0} items
+                              </Badge>
+                            )}
+                          </>
                         )}
                       </div>
                       
@@ -189,6 +211,58 @@ export function ExpenseHistory({ groupId, onAddExpense }: ExpenseHistoryProps) {
                             <Badge variant="outline" className="text-xs">
                               +{expense.splitBetween.length - 3} more
                             </Badge>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Item Details for item-based expenses */}
+                      {expense.type === 'expense' && expense.splitMethod === 'by_item' && expense.items && expense.items.length > 0 && (
+                        <div className="mt-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleExpanded(expense._id)}
+                            className="flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 font-medium"
+                          >
+                            {expandedExpenses.has(expense._id) ? (
+                              <>
+                                <ChevronUp className="h-3 w-3" />
+                                Hide items
+                              </>
+                            ) : (
+                              <>
+                                <ChevronDown className="h-3 w-3" />
+                                View {expense.items.length} items
+                              </>
+                            )}
+                          </button>
+
+                          {expandedExpenses.has(expense._id) && (
+                            <div className="mt-2 space-y-1.5 pl-2 border-l-2 border-amber-200">
+                              {expense.items.map((item) => (
+                                <div
+                                  key={item.id}
+                                  className={cn(
+                                    "flex items-center justify-between text-xs py-1",
+                                    item.isSharedCost && "text-purple-600 italic"
+                                  )}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">{item.name}</span>
+                                    {item.isSharedCost && (
+                                      <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded">
+                                        shared
+                                      </span>
+                                    )}
+                                    {!item.isSharedCost && item.assignedTo.length > 0 && (
+                                      <span className="text-muted-foreground">
+                                        ({item.assignedTo.map(a => a.userName.split(' ')[0]).join(', ')})
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="font-mono">${item.price.toFixed(2)}</span>
+                                </div>
+                              ))}
+                            </div>
                           )}
                         </div>
                       )}

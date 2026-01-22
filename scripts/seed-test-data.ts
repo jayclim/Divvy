@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { db } from '../lib/db';
-import { users, groups, usersToGroups, expenses, expenseSplits, settlements, activityLogs } from '../lib/db/schema';
+import { users, groups, usersToGroups, expenses, expenseSplits, settlements, activityLogs, emailPreferences, emailUnsubscribes, expenseItems, itemAssignments } from '../lib/db/schema';
 import { inArray, eq } from 'drizzle-orm';
 // import { createClerkClient } from '@clerk/backend'; // Removed top-level import
 import { config } from 'dotenv';
@@ -100,10 +100,27 @@ async function seedTestData(skipClerk = false) {
     const eve = userMap.get('eve@test.com')!;
     const frank = userMap.get('frank@test.com')!;
 
+    // Grant Pro status to Alice, Charlie, Dave (unlimited groups)
+    console.log('👑 Granting Pro status to Alice, Charlie, Dave...');
+    const proUsers = [alice.id, charlie.id, dave.id];
+    for (const userId of proUsers) {
+      await db.update(users).set({
+        subscriptionTier: 'pro',
+        subscriptionStatus: 'active',
+        currentPeriodEnd: null, // Never expires
+      }).where(eq(users.id, userId));
+    }
+    console.log('✅ Pro status granted');
+
+    // Bob, Eve, Frank remain Free (3 group limit applies)
+    console.log('ℹ️  Bob, Eve, Frank are Free tier (3 group limit)');
+
     // 2. Create groups and memberships
     console.log('🧹 Clearing old group data...');
     await db.delete(activityLogs);
     await db.delete(settlements);
+    await db.delete(itemAssignments);
+    await db.delete(expenseItems);
     await db.delete(expenseSplits);
     await db.delete(expenses);
     await db.delete(usersToGroups);
@@ -150,11 +167,11 @@ async function seedTestData(skipClerk = false) {
       { userId: eve.id, groupId: apartment.id, role: 'member' },
     ]);
 
-    // Group 4: Office Lunches (Bob, Charlie, Frank) - Unsettled, not all members in each expense
+    // Group 4: Office Lunches (Charlie, Bob, Frank) - Charlie owns (Pro), Bob is member (Free, at 3 group limit)
     const [officeLunches] = await db.insert(groups).values({ name: 'Office Lunches', description: 'Weekly team lunch' }).returning();
     await db.insert(usersToGroups).values([
-      { userId: bob.id, groupId: officeLunches.id, role: 'owner' },
-      { userId: charlie.id, groupId: officeLunches.id, role: 'admin' },
+      { userId: charlie.id, groupId: officeLunches.id, role: 'owner' },
+      { userId: bob.id, groupId: officeLunches.id, role: 'member' },
       { userId: frank.id, groupId: officeLunches.id, role: 'member' },
     ]);
     console.log('✅ Created groups and memberships');
@@ -206,11 +223,11 @@ async function seedTestData(skipClerk = false) {
       { expenseId: ol_e2.id, userId: charlie.id, amount: '11.00' }, { expenseId: ol_e2.id, userId: frank.id, amount: '11.00' },
     ]);
 
-    // --- Project X (Unequal Splits Feature Test) ---
+    // --- Project X (Unequal Splits Feature Test) - No Bob (he's at 3 group limit) ---
     const [projectX] = await db.insert(groups).values({ name: 'Project X', description: 'Secret unequal splitting project' }).returning();
     await db.insert(usersToGroups).values([
       { userId: alice.id, groupId: projectX.id, role: 'owner' },
-      { userId: bob.id, groupId: projectX.id, role: 'admin' },
+      { userId: dave.id, groupId: projectX.id, role: 'admin' },
       { userId: charlie.id, groupId: projectX.id, role: 'member' },
     ]);
 
@@ -226,9 +243,86 @@ async function seedTestData(skipClerk = false) {
 
     await db.insert(expenseSplits).values([
       { expenseId: px_e1.id, userId: alice.id, amount: '10.00' },
-      { expenseId: px_e1.id, userId: bob.id, amount: '20.00' },
+      { expenseId: px_e1.id, userId: dave.id, amount: '20.00' },
       { expenseId: px_e1.id, userId: charlie.id, amount: '70.00' },
     ]);
+
+    // --- Item-Based Splitting Test (Restaurant Bill) ---
+    // This tests the new item-based splitting feature with proportional tax/tip
+    console.log('🍕 Seeding item-based expense...');
+    const [itemBasedExpense] = await db.insert(expenses).values({
+      groupId: projectX.id,
+      description: 'Restaurant Dinner - Item Split',
+      amount: '86.25', // Total: $75 items + $6.75 tax + $4.50 tip
+      paidById: charlie.id,
+      date: new Date(),
+      category: 'food',
+      splitMethod: 'by_item',
+    }).returning();
+
+    // Create expense items
+    // Alice: Burger ($15) -> owes $15 + proportional tax/tip
+    // Dave: Steak ($35) -> owes $35 + proportional tax/tip
+    // Charlie: Salad ($25) -> owes $25 + proportional tax/tip
+    // Tax and Tip are shared proportionally
+    const [burgerItem] = await db.insert(expenseItems).values({
+      expenseId: itemBasedExpense.id,
+      name: 'Burger',
+      price: '15.00',
+      quantity: 1,
+      isSharedCost: false,
+    }).returning();
+
+    const [steakItem] = await db.insert(expenseItems).values({
+      expenseId: itemBasedExpense.id,
+      name: 'Steak',
+      price: '35.00',
+      quantity: 1,
+      isSharedCost: false,
+    }).returning();
+
+    const [saladItem] = await db.insert(expenseItems).values({
+      expenseId: itemBasedExpense.id,
+      name: 'Salad',
+      price: '25.00',
+      quantity: 1,
+      isSharedCost: false,
+    }).returning();
+
+    await db.insert(expenseItems).values({
+      expenseId: itemBasedExpense.id,
+      name: 'Tax',
+      price: '6.75',
+      quantity: 1,
+      isSharedCost: true, // Shared cost - distributed proportionally
+    });
+
+    await db.insert(expenseItems).values({
+      expenseId: itemBasedExpense.id,
+      name: 'Tip',
+      price: '4.50',
+      quantity: 1,
+      isSharedCost: true, // Shared cost - distributed proportionally
+    });
+
+    // Create item assignments
+    await db.insert(itemAssignments).values([
+      { itemId: burgerItem.id, userId: alice.id, sharePercentage: '100.00' },
+      { itemId: steakItem.id, userId: dave.id, sharePercentage: '100.00' },
+      { itemId: saladItem.id, userId: charlie.id, sharePercentage: '100.00' },
+      // Tax and tip have no assignments - they are distributed proportionally based on item totals
+    ]);
+
+    // Calculate splits: Total items = $75, tax/tip = $11.25
+    // Alice: $15 (20%) -> $15 + ($11.25 * 0.20) = $15 + $2.25 = $17.25
+    // Dave: $35 (46.67%) -> $35 + ($11.25 * 0.4667) = $35 + $5.25 = $40.25
+    // Charlie: $25 (33.33%) -> $25 + ($11.25 * 0.3333) = $25 + $3.75 = $28.75
+    await db.insert(expenseSplits).values([
+      { expenseId: itemBasedExpense.id, userId: alice.id, amount: '17.25' },
+      { expenseId: itemBasedExpense.id, userId: dave.id, amount: '40.25' },
+      { expenseId: itemBasedExpense.id, userId: charlie.id, amount: '28.75' },
+    ]);
+    console.log('✅ Seeded item-based expense');
 
     // 4. Add Settlements
     console.log('🤝 Seeding settlements...');
@@ -243,6 +337,29 @@ async function seedTestData(skipClerk = false) {
       { groupId: weekendTrip.id, action: 'member_added', entityId: bob.id, actorId: alice.id, createdAt: new Date(Date.now() - 9000000) },
       { groupId: weekendTrip.id, action: 'member_added', entityId: charlie.id, actorId: alice.id, createdAt: new Date(Date.now() - 8000000) },
     ]);
+
+    // 6. Add Email Preferences (variety of settings for testing)
+    console.log('📧 Seeding email preferences...');
+    await db.insert(emailPreferences).values([
+      // Alice: All notifications enabled, daily digest
+      { userId: alice.id, invitations: true, expenseAdded: true, settlementReceived: true, memberActivity: true, digestFrequency: 'daily' },
+      // Bob: Invitations only, no digest
+      { userId: bob.id, invitations: true, expenseAdded: false, settlementReceived: false, memberActivity: false, digestFrequency: 'none' },
+      // Charlie: All enabled, weekly digest
+      { userId: charlie.id, invitations: true, expenseAdded: true, settlementReceived: true, memberActivity: true, digestFrequency: 'weekly' },
+      // Dave: No notifications at all
+      { userId: dave.id, invitations: false, expenseAdded: false, settlementReceived: false, memberActivity: false, digestFrequency: 'none' },
+      // Eve and Frank: Use defaults (no entry = all enabled with daily digest)
+    ]).onConflictDoNothing();
+    console.log('✅ Seeded email preferences');
+
+    // 7. Add test email unsubscribes (for testing non-user unsubscribe flow)
+    console.log('🚫 Seeding email unsubscribes...');
+    await db.insert(emailUnsubscribes).values([
+      { email: 'unsubscribed@example.com' },
+      { email: 'donotcontact@test.com' },
+    ]).onConflictDoNothing();
+    console.log('✅ Seeded email unsubscribes');
 
     console.log('🎉 Test data seeding completed!');
   } catch (error) {

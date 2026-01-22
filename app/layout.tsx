@@ -3,7 +3,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
 import QueryProvider from "@/components/providers/QueryProvider";
-import { CookieConsent } from "@/components/CookieConsent";
+import { CookieConsentBanner } from "@/components/CookieConsent";
 
 export const metadata: Metadata = {
   title: "Spliq",
@@ -31,7 +31,7 @@ export default function RootLayout({
             <QueryProvider>
               {children}
               <Toaster />
-              <CookieConsent />
+              <CookieConsentBanner />
             </QueryProvider>
           </ThemeProvider>
         </body>

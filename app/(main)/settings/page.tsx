@@ -7,6 +7,9 @@ import { redirect } from "next/navigation";
 import { getCurrentUserSubscription, getSubscriptionURLs } from "@/lib/actions/subscription";
 import { SubscriptionManagement } from "@/components/SubscriptionManagement";
 import { PricingModal } from "@/components/PricingModal";
+import { DeleteAccountButton } from "@/components/DeleteAccountButton";
+import { NotificationSettings } from "@/components/NotificationSettings";
+import { getNotificationPreferences } from "@/lib/actions/notifications";
 
 export default async function SettingsPage() {
   const user = await getProfile();
@@ -17,6 +20,9 @@ export default async function SettingsPage() {
 
   // Get subscription details from subscriptions table
   const subscription = await getCurrentUserSubscription();
+
+  // Get notification preferences
+  const notificationPreferences = await getNotificationPreferences();
 
   // Determine the subscription ID to use (from subscriptions table or user record)
   const subscriptionId = subscription?.lemonSqueezyId || user.lemonSqueezySubscriptionId;
@@ -125,6 +131,38 @@ export default async function SettingsPage() {
               </div>
               <Button type="submit">Save Changes</Button>
             </form>
+          </CardContent>
+        </Card>
+
+        {/* Notification Settings Card */}
+        {notificationPreferences && (
+          <Card id="notifications">
+            <CardHeader>
+              <CardTitle>Email Notifications</CardTitle>
+              <CardDescription>
+                Choose which emails you want to receive from Spliq.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <NotificationSettings initialPreferences={notificationPreferences} />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Delete Account Card */}
+        <Card className="border-destructive/50">
+          <CardHeader>
+            <CardTitle className="text-destructive">Danger Zone</CardTitle>
+            <CardDescription>
+              Permanently delete your account and all associated data.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground mb-4">
+              Once you delete your account, your personal information will be permanently removed.
+              Your expense history will be anonymized to preserve accurate balances for other group members.
+            </p>
+            <DeleteAccountButton />
           </CardContent>
         </Card>
       </div>

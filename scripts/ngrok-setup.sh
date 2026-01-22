@@ -31,11 +31,14 @@ ngrok http $PORT --log=stdout | while read line; do
             echo "=========================================="
             echo "ngrok URL: $URL"
             echo ""
-            echo "Webhook URL for Lemon Squeezy:"
-            echo "$URL/api/webhooks/lemon-squeezy"
+            echo "Webhook URLs:"
             echo ""
-            echo "Update this in Lemon Squeezy Dashboard:"
-            echo "Settings → Webhooks → Edit → URL"
+            echo "  Lemon Squeezy: $URL/api/webhooks/lemon-squeezy"
+            echo "  Clerk:         $URL/api/webhooks/clerk"
+            echo ""
+            echo "Update in dashboards:"
+            echo "  • Lemon Squeezy: Settings → Webhooks → Edit → URL"
+            echo "  • Clerk: Webhooks → Add/Edit Endpoint → URL"
             echo "=========================================="
         fi
     fi

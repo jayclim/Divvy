@@ -1,7 +1,7 @@
 'use server';
 
 import { db } from '@/lib/db';
-import { groups, usersToGroups, expenses, expenseSplits, settlements } from '@/lib/db/schema';
+import { groups, usersToGroups, expenses, expenseSplits, settlements, expenseItems, itemAssignments } from '@/lib/db/schema';
 import { auth } from '@clerk/nextjs/server';
 import { syncUser } from '@/lib/auth/sync';
 import { revalidatePath } from 'next/cache';
@@ -46,14 +46,24 @@ export async function createGroupAction(data: CreateGroupData) {
   }
 }
 
+// Item data for item-based splitting
+export type ExpenseItemData = {
+  name: string;
+  price: number;
+  quantity?: number;
+  isSharedCost: boolean;
+  assignedTo: string[]; // Array of user IDs
+};
+
 export type CreateExpenseData = {
   groupId: string;
   description: string;
   amount: number;
   paidById: string;
   splitBetween: string[];
-  splitType: 'equal' | 'custom' | 'percentage';
+  splitType: 'equal' | 'custom' | 'by_item';
   customSplits?: { userId: string; amount: number }[];
+  items?: ExpenseItemData[]; // For item-based splitting
   category?: string;
   receipt?: string;
 };
@@ -91,15 +101,88 @@ export async function createExpenseAction(data: CreateExpenseData) {
       paidById: data.paidById,
       category: data.category,
       receiptUrl: data.receipt,
-      date: new Date(), // Use provided date if available in future
+      splitMethod: data.splitType,
+      date: new Date(),
     }).returning();
 
-    // Create splits
-    // Currently only handling 'equal' split type for simplicity, as per original mock
-    // In a real app, we'd handle other split types here
-    let splitsToInsert;
+    // Handle different split types
+    let splitsToInsert: { expenseId: number; userId: string; amount: string }[] = [];
 
-    if (data.splitType === 'custom' && data.customSplits) {
+    if (data.splitType === 'by_item' && data.items && data.items.length > 0) {
+      // Item-based splitting
+      const userTotals: Record<string, number> = {};
+
+      // First pass: calculate non-shared item costs per user
+      let totalNonSharedCost = 0;
+      const sharedCosts: ExpenseItemData[] = [];
+
+      for (const item of data.items) {
+        if (item.isSharedCost) {
+          sharedCosts.push(item);
+        } else {
+          totalNonSharedCost += item.price * (item.quantity || 1);
+          const itemTotal = item.price * (item.quantity || 1);
+          const perPersonAmount = itemTotal / item.assignedTo.length;
+
+          for (const assignedUserId of item.assignedTo) {
+            userTotals[assignedUserId] = (userTotals[assignedUserId] || 0) + perPersonAmount;
+          }
+        }
+      }
+
+      // Second pass: distribute shared costs proportionally
+      const totalSharedCost = sharedCosts.reduce((sum, item) => sum + item.price * (item.quantity || 1), 0);
+
+      if (totalSharedCost > 0 && totalNonSharedCost > 0) {
+        // Distribute shared costs proportionally based on non-shared spending
+        for (const [uid, amount] of Object.entries(userTotals)) {
+          const proportion = amount / totalNonSharedCost;
+          userTotals[uid] = amount + (totalSharedCost * proportion);
+        }
+      } else if (totalSharedCost > 0 && Object.keys(userTotals).length > 0) {
+        // If only shared costs, split equally among all assigned users
+        const allUsers = new Set<string>();
+        for (const item of data.items) {
+          for (const uid of item.assignedTo) {
+            allUsers.add(uid);
+          }
+        }
+        const perPersonShared = totalSharedCost / allUsers.size;
+        for (const uid of allUsers) {
+          userTotals[uid] = (userTotals[uid] || 0) + perPersonShared;
+        }
+      }
+
+      // Create expense items and assignments
+      for (const item of data.items) {
+        const [newItem] = await db.insert(expenseItems).values({
+          expenseId: newExpense.id,
+          name: item.name,
+          price: item.price.toString(),
+          quantity: item.quantity || 1,
+          isSharedCost: item.isSharedCost,
+        }).returning();
+
+        // Create assignments for this item
+        if (item.assignedTo.length > 0) {
+          const assignmentsToInsert = item.assignedTo.map(uid => ({
+            itemId: newItem.id,
+            userId: uid,
+            sharePercentage: (100 / item.assignedTo.length).toFixed(2),
+          }));
+          await db.insert(itemAssignments).values(assignmentsToInsert);
+        }
+      }
+
+      // Create splits from calculated totals
+      splitsToInsert = Object.entries(userTotals).map(([uid, amount]) => ({
+        expenseId: newExpense.id,
+        userId: uid,
+        amount: amount.toFixed(2),
+      }));
+
+    } else if (data.splitType === 'custom' && data.customSplits) {
+      // Custom split amounts
       splitsToInsert = data.customSplits.map(split => ({
         expenseId: newExpense.id,
         userId: split.userId,
@@ -108,9 +191,9 @@ export async function createExpenseAction(data: CreateExpenseData) {
     } else {
       // Default to equal split
       const splitAmount = data.amount / data.splitBetween.length;
-      splitsToInsert = data.splitBetween.map(userId => ({
+      splitsToInsert = data.splitBetween.map(uid => ({
         expenseId: newExpense.id,
-        userId: userId,
+        userId: uid,
         amount: splitAmount.toString(),
       }));
     }

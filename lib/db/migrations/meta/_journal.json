@@ -64,6 +64,41 @@
       "when": 1768341684820,
       "tag": "0008_strange_meteorite",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1768440299618,
+      "tag": "0009_calm_cerise",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1768548003742,
+      "tag": "0010_wise_wallop",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1769031486716,
+      "tag": "0011_sparkling_brood",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1769044159373,
+      "tag": "0012_true_overlord",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1769047661787,
+      "tag": "0013_special_bastion",
+      "breakpoints": true
     }
   ]
 }

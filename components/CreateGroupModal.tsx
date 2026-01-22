@@ -1,15 +1,16 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Card, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { Plus, Users, MapPin, Home } from 'lucide-react';
+import { Plus, Users, MapPin, Home, Crown, Info } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { createGroup } from '@/lib/actions/groups';
+import { getGroupLimitStatus } from '@/lib/actions/limits';
 import { useToast } from '@/hooks/useToast';
 import { useRouter } from 'next/navigation';
 
@@ -17,15 +18,33 @@ interface CreateGroupModalProps {
   onGroupCreated: () => void;
 }
 
+interface LimitStatus {
+  groupCount: number;
+  limit: number | string;
+  canCreateGroup: boolean;
+  remaining: number;
+  isPro: boolean;
+}
+
 export function CreateGroupModal({ onGroupCreated }: CreateGroupModalProps) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [limitStatus, setLimitStatus] = useState<LimitStatus | null>(null);
   const { toast } = useToast();
   const router = useRouter();
   const [createdGroup, setCreatedGroup] = useState<{ id: number; name: string } | null>(null);
-  
+
   const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<{ name: string; description: string }>();
+
+  // Fetch limit status when modal opens
+  useEffect(() => {
+    if (open) {
+      getGroupLimitStatus().then((result) => {
+        if (result) setLimitStatus(result);
+      });
+    }
+  }, [open]);
 
   const templates = [
     {
@@ -55,6 +74,15 @@ export function CreateGroupModal({ onGroupCreated }: CreateGroupModalProps) {
   ];
 
   const handleTemplateSelect = (template: typeof templates[0]) => {
+    // Show info toast if at limit instead of proceeding
+    if (limitStatus && !limitStatus.canCreateGroup) {
+      toast({
+        title: "Group Limit Reached",
+        description: "Upgrade to Pro for unlimited groups!",
+      });
+      return;
+    }
+
     setStep(2);
     // Pre-fill form with template data using setValue
     if (template.defaultName) {
@@ -66,6 +94,15 @@ export function CreateGroupModal({ onGroupCreated }: CreateGroupModalProps) {
   };
 
   const onSubmit = async (data: { name: string; description: string }) => {
+    // Double-check limit before submitting
+    if (limitStatus && !limitStatus.canCreateGroup) {
+      toast({
+        title: "Group Limit Reached",
+        description: "Upgrade to Pro for unlimited groups!",
+      });
+      return;
+    }
+
     try {
       setLoading(true);
       console.log('Creating group:', data);
@@ -96,10 +133,14 @@ export function CreateGroupModal({ onGroupCreated }: CreateGroupModalProps) {
     reset();
   };
 
+  const isAtLimit = limitStatus && !limitStatus.canCreateGroup;
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700">
+        <Button
+          className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
+        >
           <Plus className="h-4 w-4 mr-2" />
           Create Group
         </Button>
@@ -111,6 +152,34 @@ export function CreateGroupModal({ onGroupCreated }: CreateGroupModalProps) {
           </DialogTitle>
         </DialogHeader>
 
+        {/* Limit Status Banner */}
+        {step === 1 && limitStatus && !limitStatus.isPro && (
+          <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${isAtLimit
+            ? 'bg-amber-50 border border-amber-200 text-amber-800'
+            : 'bg-blue-50 border border-blue-200 text-blue-800'
+            }`}>
+            {isAtLimit ? (
+              <>
+                <Crown className="h-4 w-4 text-amber-600" />
+                <span>You've reached the free limit of {limitStatus.limit} groups.</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto text-xs border-amber-300 hover:bg-amber-100"
+                  onClick={() => router.push('/settings')}
+                >
+                  Upgrade
+                </Button>
+              </>
+            ) : (
+              <>
+                <Info className="h-4 w-4 text-blue-600" />
+                <span>{limitStatus.remaining} of {limitStatus.limit} groups remaining</span>
+              </>
+            )}
+          </div>
+        )}
+
         {step === 1 ? (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
@@ -121,7 +190,10 @@ export function CreateGroupModal({ onGroupCreated }: CreateGroupModalProps) {
               {templates.map((template) => (
                 <Card
                   key={template.id}
-                  className="cursor-pointer hover:shadow-md transition-shadow"
+                  className={`cursor-pointer transition-shadow ${isAtLimit
+                    ? 'opacity-50 cursor-not-allowed'
+                    : 'hover:shadow-md'
+                    }`}
                   onClick={() => handleTemplateSelect(template)}
                 >
                   <CardHeader className="pb-3">
@@ -176,7 +248,7 @@ export function CreateGroupModal({ onGroupCreated }: CreateGroupModalProps) {
               </Button>
               <Button
                 type="submit"
-                disabled={loading}
+                disabled={loading || !!isAtLimit}
                 className="flex-1 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
               >
                 {loading ? 'Creating...' : 'Create Group'}
