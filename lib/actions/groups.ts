@@ -261,7 +261,68 @@ export async function getGroup(groupId: string): Promise<{ group: GroupDetail }>
   });
 
   if (!membership) {
-    throw new Error('Access denied: You are not a member of this group');
+    // Check if user has a pending invitation for this group - auto-accept it
+    const pendingInvitation = await db.query.invitations.findFirst({
+      where: and(
+        eq(invitations.groupId, groupIdNum),
+        eq(invitations.email, user.email),
+        eq(invitations.status, 'pending')
+      ),
+    });
+
+    if (pendingInvitation) {
+      // Auto-accept the invitation
+      // If there is a ghost user linked, merge them
+      if (pendingInvitation.ghostUserId) {
+        // 1. Update expenses paid by ghost user
+        await db.update(expenses)
+          .set({ paidById: user.id })
+          .where(eq(expenses.paidById, pendingInvitation.ghostUserId));
+
+        // 2. Update expense splits assigned to ghost user
+        await db.update(expenseSplits)
+          .set({ userId: user.id })
+          .where(eq(expenseSplits.userId, pendingInvitation.ghostUserId));
+
+        // 3. Remove ghost user from group (usersToGroups)
+        await db.delete(usersToGroups)
+          .where(and(
+            eq(usersToGroups.userId, pendingInvitation.ghostUserId),
+            eq(usersToGroups.groupId, groupIdNum)
+          ));
+
+        // 4. Delete the ghost user record
+        try {
+          await db.delete(users).where(eq(users.id, pendingInvitation.ghostUserId));
+        } catch (e) {
+          console.warn('Could not delete ghost user record:', e);
+        }
+      }
+
+      // Add user to group
+      await db.insert(usersToGroups).values({
+        userId: user.id,
+        groupId: groupIdNum,
+        role: 'member',
+      }).onConflictDoNothing();
+
+      // Update invitation status to accepted
+      await db.update(invitations)
+        .set({ status: 'accepted' })
+        .where(eq(invitations.id, pendingInvitation.id));
+
+      // Log activity
+      await db.insert(activityLogs).values({
+        groupId: groupIdNum,
+        action: 'member_added',
+        entityId: user.id,
+        actorId: user.id, // User added themselves by accepting
+      });
+
+      console.log(`[getGroup] Auto-accepted invitation for user ${user.email} to group ${groupIdNum}`);
+    } else {
+      throw new Error('Access denied: You are not a member of this group');
+    }
   }
 
   // Get group details
@@ -1393,7 +1454,8 @@ export async function respondToInvitation(invitationId: number, accept: boolean)
       entityId: user.id,
       actorId: user.id, // User added themselves by accepting
     });
-
+  } else {
+    // Declined - just update the status
     await db.update(invitations)
       .set({ status: 'declined' })
       .where(eq(invitations.id, invitationId));

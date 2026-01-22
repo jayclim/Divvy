@@ -551,29 +551,86 @@ export const pendingNotificationsRelations = relations(pendingNotifications, ({ 
 //          TYPE EXPORTS
 // =================================
 
-export type NewSettlement = typeof settlements.$inferInsert;
+// User types
+export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+
+// Group types
+export type Group = typeof groups.$inferSelect;
 export type NewGroup = typeof groups.$inferInsert;
+
+// UsersToGroups (membership) types
+export type UserToGroup = typeof usersToGroups.$inferSelect;
+export type NewUserToGroup = typeof usersToGroups.$inferInsert;
+
+// Expense types
+export type Expense = typeof expenses.$inferSelect;
 export type NewExpense = typeof expenses.$inferInsert;
+
+// ExpenseSplit types
+export type ExpenseSplit = typeof expenseSplits.$inferSelect;
 export type NewExpenseSplit = typeof expenseSplits.$inferInsert;
-export type NewExpenseItem = typeof expenseItems.$inferInsert;
+
+// ExpenseItem types
 export type ExpenseItem = typeof expenseItems.$inferSelect;
-export type NewItemAssignment = typeof itemAssignments.$inferInsert;
+export type NewExpenseItem = typeof expenseItems.$inferInsert;
+
+// ItemAssignment types
 export type ItemAssignment = typeof itemAssignments.$inferSelect;
+export type NewItemAssignment = typeof itemAssignments.$inferInsert;
+
+// Settlement types
+export type Settlement = typeof settlements.$inferSelect;
+export type NewSettlement = typeof settlements.$inferInsert;
+
+// Message types
+export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
+
+// Invitation types
+export type Invitation = typeof invitations.$inferSelect;
 export type NewInvitation = typeof invitations.$inferInsert;
+
+// ActivityLog types
+export type ActivityLog = typeof activityLogs.$inferSelect;
 export type NewActivityLog = typeof activityLogs.$inferInsert;
-export type NewPlan = typeof plans.$inferInsert;
+
+// Plan types (Billing)
 export type Plan = typeof plans.$inferSelect;
-export type NewSubscription = typeof subscriptions.$inferInsert;
+export type NewPlan = typeof plans.$inferInsert;
+
+// Subscription types (Billing)
 export type Subscription = typeof subscriptions.$inferSelect;
-export type NewWebhookEvent = typeof webhookEvents.$inferInsert;
+export type NewSubscription = typeof subscriptions.$inferInsert;
+
+// WebhookEvent types
 export type WebhookEvent = typeof webhookEvents.$inferSelect;
-export type NewAiScanLog = typeof aiScanLogs.$inferInsert;
-export type AiScanLog = typeof aiScanLogs.$inferSelect;
-export type NewEmailPreferences = typeof emailPreferences.$inferInsert;
+export type NewWebhookEvent = typeof webhookEvents.$inferInsert;
+
+// EmailPreferences types
 export type EmailPreferences = typeof emailPreferences.$inferSelect;
-export type NewPendingNotification = typeof pendingNotifications.$inferInsert;
-export type PendingNotification = typeof pendingNotifications.$inferSelect;
-export type NewEmailUnsubscribe = typeof emailUnsubscribes.$inferInsert;
+export type NewEmailPreferences = typeof emailPreferences.$inferInsert;
+
+// EmailUnsubscribe types
 export type EmailUnsubscribe = typeof emailUnsubscribes.$inferSelect;
+export type NewEmailUnsubscribe = typeof emailUnsubscribes.$inferInsert;
+
+// PendingNotification types
+export type PendingNotification = typeof pendingNotifications.$inferSelect;
+export type NewPendingNotification = typeof pendingNotifications.$inferInsert;
+
+// AiScanLog types
+export type AiScanLog = typeof aiScanLogs.$inferSelect;
+export type NewAiScanLog = typeof aiScanLogs.$inferInsert;
+
+// Account types (Auth)
+export type Account = typeof accounts.$inferSelect;
+export type NewAccount = typeof accounts.$inferInsert;
+
+// Session types (Auth)
+export type Session = typeof sessions.$inferSelect;
+export type NewSession = typeof sessions.$inferInsert;
+
+// VerificationToken types (Auth)
+export type VerificationToken = typeof verificationTokens.$inferSelect;
+export type NewVerificationToken = typeof verificationTokens.$inferInsert;

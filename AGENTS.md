@@ -13,6 +13,7 @@ This is a Next.js 15 application for expense splitting (similar to Splitwise). I
 - **Payments**: Lemon Squeezy (subscription billing)
 - **Storage**: Supabase Storage (receipt images)
 - **AI**: Google Gemini (receipt scanning)
+- **Email**: Resend (transactional emails)
 - **Testing**: Jest, React Testing Library.
 
 ## Architecture & Directory Structure
@@ -30,7 +31,7 @@ This is a Next.js 15 application for expense splitting (similar to Splitwise). I
   - `actions/`: Server Actions for form submissions and mutations.
   - `supabase/`: Supabase Storage for receipt images (private bucket with signed URLs).
   - `ai/`: AI integrations (Gemini for receipt scanning).
-  - `email/`: Email sending utilities (Resend).
+  - `email/`: Email notifications (Resend integration, templates, unsubscribe tokens).
   - `constants/`: App-wide constants (scan limits, etc.).
 - **`components/`**: Reusable React components.
 - **`scripts/`**: Utility scripts for testing (seeding, cleaning data).
@@ -84,6 +85,11 @@ SUPABASE_SERVICE_ROLE_KEY=eyJ...  # Server-side only, never expose to client
 
 # Google Gemini (AI Receipt Scanning)
 GEMINI_API_KEY=your_gemini_api_key
+
+# Resend (Email)
+RESEND_API_KEY=re_...
+RESEND_FROM_EMAIL=Spliq <notifications@yourdomain.com>
+NEXT_PUBLIC_APP_URL=https://yourdomain.com  # Used for email links
 ```
 
 ## Code Quality
@@ -134,5 +140,40 @@ Webhook endpoint: `/api/webhooks/lemon-squeezy`
 
 Handles subscription lifecycle events (created, updated, cancelled, etc.).
 
+### Group Invitations
+- Invitation email contains link to `/groups/{id}` (the group page)
+- **Auto-accept flow**: When an invited user accesses the group page, `getGroup()` automatically accepts pending invitations matching their email
+- Supports ghost users: expenses can be assigned to invited members before they join, then merged on acceptance
+- Invitation flow:
+  1. Owner invites by email → invitation record created, email sent
+  2. Recipient clicks link → redirected to sign up (if new) or sign in
+  3. After auth, redirected back to `/groups/{id}`
+  4. `getGroup()` detects pending invitation → auto-accepts → user sees group immediately
+
+### Email Notifications
+- Uses Resend for transactional emails with React Email templates
+- Supports immediate notifications (invitations) and batched digest notifications
+- CAN-SPAM/GDPR compliant with one-click unsubscribe (RFC 8058)
+- User preferences stored in `email_preferences` table
+- Non-user unsubscribes tracked in `email_unsubscribes` table (for invitation recipients without accounts)
+- Pending notifications queued in `pending_notifications` table for daily/weekly digest
+
+**Key files:**
+- `lib/email/client.ts` - Resend client configuration
+- `lib/email/tokens.ts` - HMAC-signed unsubscribe tokens (30-day expiry)
+- `lib/email/send.ts` - Low-level email sending with unsubscribe headers
+- `lib/email/notifications.ts` - High-level notification functions
+- `lib/email/templates/` - React Email templates (BaseLayout, GroupInvitation, DailyDigest)
+- `lib/actions/notifications.ts` - Server actions for user preferences
+- `app/api/unsubscribe/route.ts` - One-click unsubscribe handler
+- `app/api/cron/digest/route.ts` - Cron endpoint for processing digest emails
+- `components/NotificationSettings.tsx` - User notification preferences UI
+
+**Database tables:**
+- `email_preferences` - Per-user notification settings (invitations, expenseAdded, etc.)
+- `pending_notifications` - Queue for batched digest notifications
+- `email_unsubscribes` - Global email blocklist for non-users
+
 ## Additional Documentation
 - `docs/SETUP_WEBHOOKS_AND_STORAGE.md` - Detailed setup for Supabase Storage and Clerk webhooks
+- `docs/EMAIL_NOTIFICATIONS.md` - Email notification system setup and testing guide

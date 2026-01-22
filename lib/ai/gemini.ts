@@ -25,10 +25,17 @@ export async function scanReceipt(imageBase64: string): Promise<ReceiptData> {
 
     const prompt = `
     Analyze this receipt image and extract the following information in strict JSON format:
-    - items: array of { name: string, price: number }
-    - total: number
+    - items: array of { name: string, price: number } - Include ALL line items from the receipt
+    - total: number (the final total amount)
     - date: string (YYYY-MM-DD format if available)
     - merchant: string (name of the store/restaurant)
+
+    IMPORTANT: The items array MUST include:
+    - All food/product items
+    - Tax (as a separate item with name "Tax")
+    - Tip/Gratuity (as a separate item with name "Tip" if present)
+    - Service charges or fees (if present)
+    - Subtotals should NOT be included as items
 
     Do not include markdown formatting like \`\`\`json. Just return the raw JSON object.
   `;
