@@ -66,45 +66,23 @@ CLERK_WEBHOOK_SECRET=whsec_...               # From Clerk Dashboard
 2. Click **New bucket**
 3. Configure:
    - **Name:** `receipts`
-   - **Public bucket:** ✅ **Enable** (receipts need public URLs)
+   - **Public bucket:** ❌ **Disabled** (we use signed URLs for security)
    - **File size limit:** `5MB` (recommended for receipt images)
    - **Allowed MIME types:** `image/jpeg, image/png, image/webp, image/heic`
 4. Click **Create bucket**
 
-### Step 4: Configure Storage Policies
+### Step 4: Storage Access Model
 
-After creating the bucket, set up access policies:
+We use a **private bucket with signed URLs** for security:
 
-1. Click on the `receipts` bucket
-2. Go to **Policies** tab
-3. Click **New policy** → **For full customization**
+- **Storage**: Images are stored in a private bucket (not publicly accessible)
+- **Access**: Time-limited signed URLs (1 hour expiry) are generated on-demand
+- **Benefits**:
+  - URLs cannot be guessed or enumerated
+  - Leaked URLs expire automatically
+  - Receipt PII is protected
 
-**Policy 1: Allow uploads (INSERT)**
-```sql
--- Policy name: Allow authenticated uploads
-CREATE POLICY "Allow authenticated uploads"
-ON storage.objects FOR INSERT
-TO authenticated
-WITH CHECK (bucket_id = 'receipts');
-```
-
-Or use the UI:
-- **Policy name:** `Allow authenticated uploads`
-- **Allowed operation:** `INSERT`
-- **Target roles:** `authenticated`
-- **WITH CHECK expression:** `bucket_id = 'receipts'`
-
-**Policy 2: Allow public reads (SELECT)**
-```sql
--- Policy name: Allow public reads
-CREATE POLICY "Allow public reads"
-ON storage.objects FOR SELECT
-TO public
-USING (bucket_id = 'receipts');
-```
-
-**Policy 3: Allow service role full access**
-The service role key automatically has full access, so uploads from our server will work.
+**No additional policies needed** - the service role key has full access for server-side operations.
 
 ### Step 5: Update Environment Variables
 

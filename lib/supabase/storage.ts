@@ -2,6 +2,9 @@ import { createClient } from '@supabase/supabase-js';
 
 const BUCKET_NAME = 'receipts';
 
+// Signed URLs expire after 1 hour (in seconds)
+const SIGNED_URL_EXPIRY = 60 * 60;
+
 function getSupabaseClient() {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -14,11 +17,11 @@ function getSupabaseClient() {
 }
 
 /**
- * Uploads a receipt image to Supabase Storage
+ * Uploads a receipt image to Supabase Storage (private bucket)
  * @param userId - The user's ID for organizing files
  * @param imageBase64 - Base64 encoded image data
  * @param mimeType - The image MIME type (e.g., 'image/jpeg', 'image/png')
- * @returns The public URL of the uploaded image
+ * @returns The storage path (not a URL) - use getReceiptSignedUrl() for access
  */
 export async function uploadReceiptImage(
     userId: string,
@@ -47,37 +50,45 @@ export async function uploadReceiptImage(
         throw new Error(`Failed to upload receipt image: ${error.message}`);
     }
 
-    // Construct the public URL manually to ensure correct format
-    // Format: https://<project>.supabase.co/storage/v1/object/public/<bucket>/<path>
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const publicUrl = `${supabaseUrl}/storage/v1/object/public/${BUCKET_NAME}/${data.path}`;
+    // Return the file path (not a public URL)
+    // Use getReceiptSignedUrl() to generate time-limited access URLs
+    return data.path;
+}
 
-    console.log('[Supabase Storage] Generated public URL:', publicUrl);
+/**
+ * Generates a time-limited signed URL for accessing a receipt image
+ * @param storagePath - The storage path returned from uploadReceiptImage
+ * @param expiresIn - Optional expiry time in seconds (default: 1 hour)
+ * @returns A signed URL that expires after the specified time
+ */
+export async function getReceiptSignedUrl(
+    storagePath: string,
+    expiresIn: number = SIGNED_URL_EXPIRY
+): Promise<string> {
+    const supabase = getSupabaseClient();
 
-    return publicUrl;
+    const { data, error } = await supabase.storage
+        .from(BUCKET_NAME)
+        .createSignedUrl(storagePath, expiresIn);
+
+    if (error) {
+        console.error('Supabase signed URL error:', error);
+        throw new Error(`Failed to generate signed URL: ${error.message}`);
+    }
+
+    return data.signedUrl;
 }
 
 /**
  * Deletes a receipt image from Supabase Storage
- * Used for GDPR deletion requests or cleanup
- * @param imageUrl - The public URL of the image to delete
+ * @param storagePath - The storage path of the image to delete
  */
-export async function deleteReceiptImage(imageUrl: string): Promise<void> {
+export async function deleteReceiptImage(storagePath: string): Promise<void> {
     const supabase = getSupabaseClient();
-
-    // Extract the file path from the URL
-    const url = new URL(imageUrl);
-    const pathParts = url.pathname.split(`/storage/v1/object/public/${BUCKET_NAME}/`);
-
-    if (pathParts.length !== 2) {
-        throw new Error('Invalid receipt image URL');
-    }
-
-    const filePath = pathParts[1];
 
     const { error } = await supabase.storage
         .from(BUCKET_NAME)
-        .remove([filePath]);
+        .remove([storagePath]);
 
     if (error) {
         console.error('Supabase delete error:', error);

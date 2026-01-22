@@ -5,7 +5,7 @@ import { scanReceipt } from '@/lib/ai/gemini';
 import { db } from '@/lib/db';
 import { users, aiScanLogs } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { uploadReceiptImage } from '@/lib/supabase/storage';
+import { uploadReceiptImage, getReceiptSignedUrl } from '@/lib/supabase/storage';
 import { AI_SCAN_LIMITS } from '@/lib/constants/limits';
 
 // Use the centralized scan limits
@@ -88,27 +88,31 @@ export async function processReceiptAction(formData: FormData) {
     const base64Image = buffer.toString('base64');
     const mimeType = file.type || 'image/jpeg';
 
-    let receiptImageUrl: string | null = null;
+    let receiptStoragePath: string | null = null;
 
     try {
-        // Upload image to Supabase Storage
-        receiptImageUrl = await uploadReceiptImage(userId, base64Image, mimeType);
+        // Upload image to Supabase Storage (returns storage path, not URL)
+        receiptStoragePath = await uploadReceiptImage(userId, base64Image, mimeType);
 
         // Scan receipt with AI
         const data = await scanReceipt(base64Image);
 
-        // Log successful scan
+        // Log successful scan (store the path for future reference)
         await db.insert(aiScanLogs).values({
             userId,
-            receiptImageUrl,
+            receiptImageUrl: receiptStoragePath, // Store path, not URL
             rawResponse: data,
             status: 'success',
         });
 
+        // Generate a signed URL for immediate display (expires in 1 hour)
+        const signedUrl = await getReceiptSignedUrl(receiptStoragePath);
+
         return {
             success: true,
             data,
-            receiptImageUrl,
+            receiptImageUrl: signedUrl, // Return signed URL for display
+            receiptStoragePath, // Also return path if needed for storage
             scansRemaining: remaining,
         };
     } catch (error) {
@@ -117,7 +121,7 @@ export async function processReceiptAction(formData: FormData) {
         // Log failed scan
         await db.insert(aiScanLogs).values({
             userId,
-            receiptImageUrl,
+            receiptImageUrl: receiptStoragePath, // Store path if upload succeeded before error
             status: 'failed',
             errorMessage: error instanceof Error ? error.message : 'Unknown error',
         });
